@@ -6,6 +6,9 @@ import { AccessToken, AgentDispatchClient, RoomServiceClient } from 'livekit-ser
 
 const { LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, AGENT_NAME } = process.env;
 const port = Number(process.env.PREVIEW_PORT || 5190);
+// The agent sends the picture on its side for a phone held upright (TOUR_ORIENTATION, portrait unless set to landscape):
+// stand it up again here, as FaceTime does.
+const upright = (process.env.TOUR_ORIENTATION || 'portrait') !== 'landscape';
 const http = LIVEKIT_URL.replace(/^ws/, 'http');
 const rooms = new RoomServiceClient(http, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 const dispatch = new AgentDispatchClient(http, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
@@ -24,6 +27,8 @@ const page = `<!doctype html>
   main { width: min(1120px, 100vw); padding: 16px; }
   .screen { position: relative; aspect-ratio: 16 / 9; background: #18211f; border-radius: 18px; overflow: hidden; }
   video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .screen.upright { aspect-ratio: 9 / 16; height: min(82vh, 860px); margin: 0 auto; border-radius: 34px; }
+  .screen.upright video { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(90deg); }
   .idle { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; }
   .idle h1 { font: 400 40px/1.1 Georgia, serif; margin: 0 0 8px; }
   .idle p { margin: 0; opacity: .7; }
@@ -36,7 +41,7 @@ const page = `<!doctype html>
 </head>
 <body>
 <main>
-  <div class="screen">
+  <div class="screen${upright ? ' upright' : ''}" id="screen">
     <video id="video" autoplay playsinline muted></video>
     <div class="idle" id="idle"><div><h1>Call Ellie</h1><p>The same call FaceTime would make, in this tab. Allow the microphone, then just talk.</p></div></div>
   </div>
@@ -46,6 +51,9 @@ const page = `<!doctype html>
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
+// Upright, the video is turned a quarter turn, so it is as wide as the screen is tall.
+const fit = () => { if (!$('screen').classList.contains('upright')) return; $('video').style.width = $('screen').clientHeight + 'px'; $('video').style.height = $('screen').clientWidth + 'px'; };
+addEventListener('resize', fit); fit();
 let room = null, name = null;
 const say = text => { $('status').textContent = text; };
 async function hangUp() {

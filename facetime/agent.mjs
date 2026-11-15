@@ -78,8 +78,9 @@ const agent = defineAgent({
     console.log(borrowed ? `[open-house] voice: ElevenLabs ${ELEVEN_MODEL}, OpenAI speech standing by`
       : `[open-house] voice: OpenAI Realtime (backup), because ${trouble}`);
     // When she takes her turn: on what was said sounding finished, not on the first pause, so she does not finish the
-    // caller's sentences. OPEN_HOUSE_PATIENCE is low (waits longest), medium or high. Speaking over her still stops her.
-    const turnDetection = { type: 'semantic_vad', eagerness: process.env.OPEN_HOUSE_PATIENCE || 'low', create_response: true, interrupt_response: true };
+    // caller's sentences. OPEN_HOUSE_PATIENCE is the model's eagerness to answer: low waits longest (it left a long gap
+    // after the caller cut in), high answers soonest, medium is between. Speaking over her still stops her.
+    const turnDetection = { type: 'semantic_vad', eagerness: process.env.OPEN_HOUSE_PATIENCE || 'medium', create_response: true, interrupt_response: true };
     // A microphone across a room also needs far-field clean-up.
     const ears = { turnDetection, ...(process.env.OPEN_HOUSE_ROOM_MIC ? { inputAudioNoiseReduction: { type: 'far_field' } } : {}) };
     const session = new voice.AgentSession(borrowed

@@ -14,6 +14,8 @@ const here = dirname(fileURLToPath(import.meta.url));
  * `mediaDir` is the property's bundle: tour.json, a panorama per stop and the aerial (screen-worker.mjs has the layout).
  * Left out, it is the folder named by OPEN_HOUSE_MEDIA, or the first tour in data/demo.
  * `show(view)` moves the picture to a tour view; `play(onFrame)` starts handing over RGBA frames; `pause()` stops.
+ * The frames are WIDTH x HEIGHT whichever way the picture is drawn: upright for a phone held upright, laid on its
+ * side in the frame, unless TOUR_ORIENTATION=landscape (TOUR_ROTATE=cw lays it on its other side).
  */
 export function createScreen({ mediaDir = process.env.OPEN_HOUSE_MEDIA || join(here, '../data/demo') } = {}) {
   const worker = new Worker(new URL('./screen-worker.mjs', import.meta.url), { workerData: { width: WIDTH, height: HEIGHT, fps: FPS, mediaDir } });

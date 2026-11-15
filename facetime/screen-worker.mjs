@@ -10,6 +10,7 @@
 //   view.paints   { [stop]: { rgb, label } }             the stop's wall (the bundle's walls/) painted this colour
 //   view.sources  { [sweepId]: { file, label } }         another panorama (a staged room) in place of the scan
 //   view.spin     { id, arc: 'full' | [from, to], seconds }   one slow turn to show the whole room, once per id
+// The picture is drawn upright, for a phone held upright, unless TOUR_ORIENTATION=landscape (see W and H below).
 //
 // Everything about a property comes from one folder, its bundle (`mediaDir`):
 //   tour.json          { property: { name, address, caption }, stops: { [key]: { label, detail, sweep, yaw, pitch } },
@@ -32,11 +33,19 @@ import sharp from 'sharp';
 import { finishes } from '../shared/tour.mjs';
 import { loadWalls, tintPano } from './paint.mjs';
 
-const { width: W, height: H, fps } = workerData;
+// The frame handed over is wider than it is high, 1280 x 720. A caller holds the phone upright, and FaceTime turns
+// that frame a quarter turn to fill the screen. So the picture is drawn upright, 720 x 1280, and laid on its side
+// in the frame (turned(), below), which FaceTime then stands up again. TOUR_ORIENTATION=landscape draws it wide
+// instead, for a phone held sideways.
+const { width: FW, height: FH, fps } = workerData;
+const portrait = process.env.TOUR_ORIENTATION !== 'landscape';
+const W = portrait ? FH : FW, H = portrait ? FW : FH;
 const N = W * H;
-const S = W / 1280;                       // every size below is drawn for 1280 x 720 and scaled
+const S = W / (portrait ? 720 : 1280);    // every size below is drawn for 1280 x 720, or upright for 720 x 1280, and scaled
 const DEG = Math.PI / 180, TAU = 2 * Math.PI;
-const TAN = Math.tan(30 * DEG);           // half of the 60 degree vertical field of view, the same as the posters
+// Half of the vertical field of view. Wide it is 60 degrees, the same as the posters. Upright it is 84, a phone's
+// camera held upright, which is 54 degrees across.
+const TAN = Math.tan((portrait ? 42 : 30) * DEG);
 const here = dirname(fileURLToPath(import.meta.url));
 const mediaDir = resolve(workerData.mediaDir);
 const tour = JSON.parse(await readFile(join(mediaDir, 'tour.json'), 'utf8'));
@@ -122,7 +131,7 @@ function keep(cache, key, value, most) {
 }
 
 const esc = text => String(text).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
-const svg = body => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 1280 720">${body}</svg>`);
+const svg = body => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${portrait ? '720 1280' : '1280 720'}">${body}</svg>`);
 const SANS = 'font-family="Helvetica Neue, Helvetica, Arial, sans-serif"';
 const SERIF = 'font-family="Georgia, Times New Roman, serif"';
 
@@ -130,8 +139,59 @@ const SERIF = 'font-family="Georgia, Times New Roman, serif"';
 const NARROW = new Set(" ·.,:;'|!()-iltfrjI");
 const span = text => [...String(text)].reduce((sum, letter) => sum + (NARROW.has(letter) ? 0.295 : 0.5665), 0);
 
+/** Words broken into lines of about `width` letters: there is nothing here that wraps text. */
+function lines(text, width) {
+  const out = [''];
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    if ((out.at(-1) + ' ' + word).trim().length > width) out.push(word);
+    else out[out.length - 1] = (out.at(-1) + ' ' + word).trim();
+  }
+  return out;
+}
+
+/** At most `most` such lines, the last ending in an ellipsis where words were left over. */
+function some(text, width, most) {
+  const all = lines(text, width);
+  return all.length > most ? [...all.slice(0, most - 1), `${all[most - 1].slice(0, width - 1).trimEnd()}…`] : all;
+}
+
+// Upright, FaceTime lays its own controls over the picture and cuts off its sides. What is clear of all of it,
+// measured on a call: x from 80 to 640; below y = 190 (the name of the call); left of x = 500 down to y = 430
+// (the caller's own picture); left of x = 590 below y = 880 (the buttons).
+const CLEAR = { left: 84, right: 636, top: 230, tile: [500, 454], buttons: [590, 880] };
+const serif = text => 1.08 * span(text);    // the serif face runs a little wider than the sans
+
+/**
+ * The caption upright: the place, lower left, and above it the paint or furniture on show. No more than that
+ * fits between FaceTime's controls, and the guide says the rest aloud.
+ */
+function captionUpright({ title = '', chip }) {
+  // One line at 54 px where that fits before the buttons, smaller down to 40 px, and beyond that two lines.
+  const room = CLEAR.buttons[0] - CLEAR.left;
+  let rows = [String(title)], size = Math.min(54, room / serif(title));
+  if (size < 40) {
+    rows = some(title, Math.ceil(String(title).length / 2) + 3, 2);
+    size = Math.min(44, room / Math.max(...rows.map(serif)));
+  }
+  const first = 1150 - (rows.length - 1) * size * 1.14;
+  const label = chip && (chip.label.length > 30 ? `${chip.label.slice(0, 29).trimEnd()}…` : chip.label);
+  const swatch = chip?.color ? 28 : 0, chipWidth = chip ? 36 + swatch + label.length * 11.5 : 0, top = first - size * 0.8 - 58;
+  return `
+    <defs><radialGradient id="shade" gradientUnits="userSpaceOnUse" cx="140" cy="1190" r="560" gradientTransform="translate(140 1190) scale(1.2 0.72) translate(-140 -1190)">
+      <stop offset="0" stop-color="#000" stop-opacity="0.62"/><stop offset="0.5" stop-color="#000" stop-opacity="0.4"/><stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient></defs>
+    <rect x="0" y="760" width="720" height="520" fill="url(#shade)"/>
+    <g ${SANS}>
+      ${chip ? `<rect x="${CLEAR.left}" y="${top}" width="${chipWidth}" height="42" rx="21" fill="#fff" fill-opacity="0.94"/>
+      ${swatch ? `<circle cx="${CLEAR.left + 24}" cy="${top + 21}" r="11" fill="${chip.color}" stroke="#0d1413" stroke-opacity="0.25"/>` : ''}
+      <text x="${CLEAR.left + (chipWidth + swatch) / 2}" y="${top + 28}" text-anchor="middle" font-size="20" font-weight="600" fill="#0d1413">${esc(label)}</text>` : ''}
+      ${rows.map((row, index) => `<text x="${CLEAR.left}" y="${first + index * size * 1.14}" ${SERIF} font-size="${size.toFixed(1)}" fill="#fff">${esc(row)}</text>`).join('')}
+    </g>`;
+}
+
 /** The lower third: where we are, what it is, and which data layer the picture comes from. Above, which property this is. */
 function caption({ title = '', detail = '', source = '', chip }) {
+  if (portrait) return captionUpright({ title, chip });
   const swatch = chip?.color ? 28 : 0;      // a chip without a colour is words only
   const chipWidth = chip ? 36 + swatch + chip.label.length * 11.5 : 0;
   const pill = Math.min(Math.round(93 + 19 * span(header) + 0.4 * header.length), 1200);
@@ -156,7 +216,7 @@ function caption({ title = '', detail = '', source = '', chip }) {
 /** A caption as frame pixels, with the rows that have anything in them so a frame only visits those. */
 const overlays = new Map();
 async function overlay(words) {
-  const key = JSON.stringify(words);
+  const key = JSON.stringify(portrait ? { title: words.title, chip: words.chip } : words);     // upright, that is all a caption shows
   if (overlays.has(key)) return keep(overlays, key, overlays.get(key), 5);
   const { data } = await pixels(svg(caption(words)));
   const rows = [];
@@ -179,16 +239,20 @@ async function drawSite() {
   if (!size || !anchor) throw new Error('The bundle has no aerial: tour.json needs site.size and site.anchor');
   const scale = Math.max(W / size[0], H / size[1]);
   const width = Math.round(size[0] * scale), height = Math.round(size[1] * scale);
-  const centre = parking ? [(anchor[0] + parking[0]) / 2, (anchor[1] + parking[1]) / 2] : anchor;
-  const top = Math.round(clamp(centre[1] * height - H * 0.45, 0, height - H));
+  // Both spots in the middle where they fit between the sides FaceTime cuts off an upright picture, or else the property.
+  const apart = parking ? Math.abs(anchor[0] - parking[0]) * width / S : 0;
+  const centre = parking && !(portrait && apart > 520) ? [(anchor[0] + parking[0]) / 2, (anchor[1] + parking[1]) / 2] : anchor;
+  const top = Math.round(clamp(centre[1] * height - H * (portrait ? 0.5 : 0.45), 0, height - H));
   const left = Math.round(clamp(centre[0] * width - W / 2, 0, width - W));
   const base = await sharp(join(mediaDir, basename(site.image ?? 'site.webp'))).resize(width, height, { kernel: 'lanczos3' })
     .extract({ left, top, width: W, height: H }).toBuffer();
   const point = ([x, y]) => [(x * width - left) / S, (y * height - top) / S];
   const [ax, ay] = point(anchor), [px, py] = parking ? point(parking) : [ax, ay];
   // A label is a box that ends `right` of its spot, above or below it, and stays inside the picture.
+  // (Upright that is inside what FaceTime leaves clear, once the slow push-in has run its course.)
+  const [least, most] = portrait ? [360 - (360 - CLEAR.left) / 1.08, 360 + (CLEAR.right - 360) / 1.08] : [16, 1264];
   const label = (words, x, y, right, pad) => {
-    const wide = Math.round(44 + 20 * span(words)), from = clamp(x + right - wide, 16, 1264 - wide);
+    const wide = Math.round(44 + 20 * span(words)), from = clamp(x + right - wide, least, most - wide);
     return `<rect x="${from}" y="${y}" width="${wide}" height="38" rx="19" fill="#0d1413" fill-opacity="0.82"/>
         <text x="${from + wide - pad}" y="${y + 26}" font-size="20" font-weight="600" fill="#fff">${esc(words)}</text>`;
   };
@@ -206,6 +270,28 @@ async function drawSite() {
   return { ...image, layer, focus: [(ax + px) / 2 * S, (ay + py) / 2 * S] };
 }
 
+/** The middle of a shape's area. */
+function middle(points) {
+  let area = 0, x = 0, y = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const cross = points[j][0] * points[i][1] - points[i][0] * points[j][1];
+    area += cross; x += (points[j][0] + points[i][0]) * cross; y += (points[j][1] + points[i][1]) * cross;
+  }
+  return [x / (3 * area), y / (3 * area)];
+}
+
+/** The stretch of the level line through (x, y) that lies inside a shape and has x on it: [from, to], or null when the point is outside. */
+function chord(points, x, y) {
+  const cuts = [];
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [ax, ay] = points[i], [bx, by] = points[j];
+    if ((ay > y) !== (by > y)) cuts.push(ax + (bx - ax) * (y - ay) / (by - ay));
+  }
+  cuts.sort((a, b) => a - b);
+  for (let i = 0; i + 1 < cuts.length; i += 2) if (x >= cuts[i] && x <= cuts[i + 1]) return [cuts[i], cuts[i + 1]];
+  return null;
+}
+
 function inside([x, y], polygon) {
   let within = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -215,19 +301,9 @@ function inside([x, y], polygon) {
   return within;
 }
 
-/** The floor plan from the scan's room boundaries, with the room and spot the camera stands in and the planned route marked. */
-/** Words broken into lines of about `width` letters, for a card: there is nothing here that wraps text. */
-function lines(text, width) {
-  const out = [''];
-  for (const word of String(text).split(/\s+/).filter(Boolean)) {
-    if ((out.at(-1) + ' ' + word).trim().length > width) out.push(word);
-    else out[out.length - 1] = (out.at(-1) + ' ' + word).trim();
-  }
-  return out;
-}
-
 /** A card of words in place of the camera: the recap of a visit. view.card = { title, rows: [{ label, text }], footer }. */
 async function cardImage(card) {
+  if (portrait) return cardUpright(card);
   let y = 212;
   const rows = (card.rows ?? []).slice(0, 6).map(row => {
     const text = lines(row.text, 74).slice(0, 2);
@@ -251,34 +327,90 @@ async function cardImage(card) {
     </g>`));
 }
 
+/**
+ * The card upright: the title where FaceTime's controls begin to leave room, then up to five rows of up to three
+ * lines each, every line kept short of the caller's own picture and of the buttons. No footer: it would lie under them.
+ */
+async function cardUpright(card) {
+  const title = String(card.title ?? 'Visit recap'), heading = some(title, Math.max(16, Math.ceil(title.length / 2) + 2), 2);
+  const size = Math.min(46, (CLEAR.tile[0] - CLEAR.left) / Math.max(...heading.map(serif)));
+  let y = 260 + (heading.length - 1) * size * 1.15 + 66, rows = '';
+  for (const row of (card.rows ?? []).slice(0, 5)) {
+    // The letters a line has room for: fewer beside the caller's own picture, and beside the buttons.
+    const letters = y + 38 < CLEAR.tile[1] ? 26 : y + 38 * 3 > CLEAR.buttons[1] ? 31 : 34;
+    const text = some(row.text, letters, 3);
+    if (y + text.length * 38 > 1180) break;
+    rows += `<text x="${CLEAR.left}" y="${y}" font-size="15" font-weight="600" fill="#fff" fill-opacity="0.55" letter-spacing="2.4">${esc(String(row.label).toUpperCase())}</text>`
+      + text.map((line, index) => `<text x="${CLEAR.left}" y="${y + 38 + index * 38}" font-size="30" fill="#fff">${esc(line)}</text>`).join('');
+    y += 38 * text.length + 44;
+  }
+  return pixels(svg(`<rect width="720" height="1280" fill="#18211f"/>
+    <g ${SANS}>
+      ${heading.map((line, index) => `<text x="${CLEAR.left}" y="${260 + index * size * 1.15}" ${SERIF} font-size="${size.toFixed(1)}" fill="#fff">${esc(line)}</text>`).join('')}
+      ${rows}
+    </g>`));
+}
+
+/** The floor plan from the scan's room boundaries, with the room and spot the camera stands in and the planned route marked. */
 async function planImage(view, place) {
   const rooms = tour.rooms ?? [];
   if (!rooms.length) throw new Error('The bundle has no floor plan: tour.json needs rooms');
   const all = rooms.flatMap(room => room.polygon);
   const minX = Math.min(...all.map(p => p[0])), maxX = Math.max(...all.map(p => p[0]));
   const minY = Math.min(...all.map(p => p[1])), maxY = Math.max(...all.map(p => p[1]));
-  const scale = Math.min(1000 / (maxX - minX), 470 / (maxY - minY));
+  let scale = Math.min(1000 / (maxX - minX), 470 / (maxY - minY));
   const ox = 640 - (maxX + minX) / 2 * scale, oy = 322 + (maxY + minY) / 2 * scale;
-  const at = ([x, y]) => [ox + x * scale, oy - y * scale];
+  let at = ([x, y]) => [ox + x * scale, oy - y * scale];
+  if (portrait) {
+    // Upright the plan has what is clear of FaceTime's controls down to y = 900: the tall box left of the caller's own
+    // picture, or the wide one below it, whichever shows it larger. A plan wider than it is deep is turned a quarter
+    // turn where that shows it at least 15% larger still, the end the scan was begun at, the way in, at the bottom.
+    const boxes = [[CLEAR.left, CLEAR.tile[0] - 4, CLEAR.top, 900], [CLEAR.left, CLEAR.right, CLEAR.tile[1], 900]];
+    const [wide, deep] = [maxX - minX, maxY - minY], [mx, my] = [(maxX + minX) / 2, (maxY + minY) / 2];
+    const fit = (across, down) => boxes.map(box => [Math.min((box[1] - box[0]) / across, (box[3] - box[2]) / down), box]).sort((a, b) => b[0] - a[0])[0];
+    const flat = fit(wide, deep), tall = fit(deep, wide), turnIt = tall[0] > flat[0] * 1.15, side = sweeps.values().next().value?.x > mx ? -1 : 1;
+    const [, box] = turnIt ? tall : flat, cx = (box[0] + box[1]) / 2, cy = (box[2] + box[3]) / 2;
+    scale = turnIt ? tall[0] : flat[0];
+    at = turnIt ? ([x, y]) => [cx - side * (y - my) * scale, cy - side * (x - mx) * scale] : ([x, y]) => [cx + (x - mx) * scale, cy - (y - my) * scale];
+  }
   const here = place.roomId ?? rooms.find(room => inside([place.sweep.x, place.sweep.y], room.polygon))?.id;
   const marks = new Map([...sweeps.values()].map(sweep => [sweep.id, at([sweep.x, sweep.y])]));
+  const names = [];                            // upright, the names go on after every room is drawn, so that no wall crosses one
   const shapes = rooms.map(room => {
     const points = room.polygon.map(at);
+    const across = Math.max(...points.map(p => p[0])) - Math.min(...points.map(p => p[0])), down = Math.max(...points.map(p => p[1])) - Math.min(...points.map(p => p[1]));
     const cx = (Math.min(...points.map(p => p[0])) + Math.max(...points.map(p => p[0]))) / 2;
     const cy = (Math.min(...points.map(p => p[1])) + Math.max(...points.map(p => p[1]))) / 2;
     const current = room.id === here;
     const small = room.area_sqft < 40;
-    return `<polygon points="${points.map(p => p.map(v => v.toFixed(1)).join(',')).join(' ')}"
-        fill="${current ? '#dfe8d6' : '#f6f5ef'}" stroke="#0d1413" stroke-width="5" stroke-linejoin="round"/>
+    const outline = `<polygon points="${points.map(p => p.map(v => v.toFixed(1)).join(',')).join(' ')}"
+        fill="${current ? '#dfe8d6' : '#f6f5ef'}" stroke="#0d1413" stroke-width="${portrait ? 4 : 5}" stroke-linejoin="round"/>`;
+    if (portrait) {
+      // Upright the rooms are smaller. A name goes at the middle of the room's own floor (a room can be an L), as
+      // large as the room has width for there, on two lines where one would be too small to read, and is left out
+      // of a room with no room for it. The area is under it where there is height.
+      const [gx, gy] = middle(points), run = chord(points, gx, gy), rise = run && chord(points.map(([x, y]) => [y, x]), gy, (run[0] + run[1]) / 2);
+      const [lx, ly, width, height] = run && rise ? [(run[0] + run[1]) / 2, gy, run[1] - run[0], 2 * Math.min(gy - rise[0], rise[1] - gy)] : [cx, cy, across, down];
+      const one = Math.min((width - 12) / span(room.type), 19), halves = lines(room.type, Math.ceil(room.type.length / 2)).slice(0, 2);
+      const two = Math.min((width - 12) / Math.max(...halves.map(span)), 15);
+      const name = one >= 12 ? [room.type] : halves.length === 2 && two >= 10 && height > two * 2.6 ? halves : one >= 10 ? [room.type] : [];
+      const size = name.length === 2 ? two : one, both = name.length === 1 && !small && height > size * 2.7 + 8;
+      const from = ly + (both ? -2 : name.length === 2 ? -size * 0.2 : size * 0.35);
+      names.push(name.map((line, index) => `<text x="${lx}" y="${from + index * size * 1.1}" font-size="${size.toFixed(1)}" font-weight="600" fill="#0d1413">${esc(line)}</text>`).join('')
+        + (both ? `<text x="${lx}" y="${ly + size * 0.95 + 2}" font-size="${Math.min(size * 0.82, 15).toFixed(1)}" fill="#0d1413" fill-opacity="0.62">${Math.round(room.area_sqft)} sq ft</text>` : ''));
+      return outline;
+    }
+    return `${outline}
       <text x="${cx}" y="${cy - (small ? -5 : 2)}" font-size="${small ? 13 : 19}" font-weight="600" fill="#0d1413">${esc(room.type)}</text>
       ${small ? '' : `<text x="${cx}" y="${cy + 22}" font-size="16" fill="#0d1413" fill-opacity="0.62">${Math.round(room.area_sqft)} sq ft</text>`}`;
   }).join('');
   const route = (view.path ?? []).map(leg => `<polyline points="${leg.map(id => marks.get(id)).filter(Boolean)
     .map(p => p.map(v => v.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="#ff5a4e" stroke-width="6"
     stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 13"/>`).join('');
-  const stop = marks.get(place.sweep.id);
-  return pixels(svg(`<rect width="1280" height="720" fill="#18211f"/>
-    <g ${SANS} text-anchor="middle">${shapes}${route}
+  // Upright, a spot outside the house would fall under FaceTime's controls or off the picture: it is left out.
+  const spot = marks.get(place.sweep.id), stop = !portrait || (spot && spot[0] > 60 && spot[0] < 660 && spot[1] > 200 && spot[1] < 960) ? spot : null;
+  return pixels(svg(`<rect width="${portrait ? 720 : 1280}" height="${portrait ? 1280 : 720}" fill="#18211f"/>
+    <g ${SANS} text-anchor="middle">${shapes}${names.join('')}${route}
       ${stop ? `<circle cx="${stop[0]}" cy="${stop[1]}" r="20" fill="#ff5a4e" fill-opacity="0.25"/>
       <circle cx="${stop[0]}" cy="${stop[1]}" r="9" fill="#ff5a4e" stroke="#fff" stroke-width="3"/>` : ''}
     </g>` + caption({ title: planWords.title, detail: planWords.detail, source: planWords.source })));
@@ -490,6 +622,8 @@ async function staged(file) {
   });
 }
 
+const preview = portrait ? '' : ' preview';        // upright there is no room for the word, and the guide says it aloud
+
 /** The picture and caption words for a sweep under this view: the scan, or its staged room, with the paint on top. */
 async function dress(view, id) {
   const sweep = sweeps.get(id);
@@ -499,7 +633,7 @@ async function dress(view, id) {
   if (staging && !room && stand?.sweep === sweep) return stand.dress;       // keep showing what was on screen
   if (room) {
     source = room;
-    chip = { label: `Staging preview · ${staging.label ?? 'Staged'}` };
+    chip = { label: `Staging${preview} · ${staging.label ?? 'Staged'}` };
     credit = 'AI staging preview on the Matterport scan';
   }
   const paint = sweep.stop && walls[sweep.stop] ? view.paints?.[sweep.stop] : null;
@@ -508,11 +642,11 @@ async function dress(view, id) {
   const finished = finish ? await staged(join(mediaDir, `${sweep.stop}-${view.finish}.webp`)) : null;
   if (rgb) {
     source = await painted(source, sweep.stop, rgb);
-    chip = { label: `Paint preview · ${paint.label ?? 'Custom'}`, color: `rgb(${rgb.join(',')})` };
+    chip = { label: `Paint${preview} · ${paint.label ?? 'Custom'}`, color: `rgb(${rgb.join(',')})` };
     credit = room ? 'AI staging and paint preview on the Matterport scan' : 'Paint preview on the Matterport scan';
   } else if (finished) {
     source = finished;
-    chip = { label: `Paint preview · ${finish.label}`, color: finish.color };
+    chip = { label: `Paint${preview} · ${finish.label}`, color: finish.color };
     credit = 'Blender paint preview on the Matterport scan';
   }
   return { source, chip, credit };
@@ -536,8 +670,13 @@ function placeOf(view) {
 function lookOf(view, place) {
   const look = view.look;
   if (!look || typeof look !== 'object') return null;
-  return { yaw: turn(number(look.yaw, 0)), pitch: clamp(number(look.pitch, place.pitch), -45, 45), zoom: clamp(number(look.zoom, 1), 1, 2.5) };
+  const zoom = clamp(number(look.zoom, 1), 1, 2.5);
+  return { yaw: turn(number(look.yaw, 0)), pitch: clamp(number(look.pitch, place.pitch), -45, 45), zoom: portrait ? Math.max(1, zoom * CLOSE) : zoom };
 }
+
+// The close-ups were framed for the wide picture. Upright the picture is about half as wide, so a close-up is
+// never closer than shows as much from side to side as it did then: up to zoom 2 that is the plain view.
+const CLOSE = TAN * W / H / (Math.tan(30 * DEG) * 16 / 9);
 
 // ---- drawing --------------------------------------------------------------------------------------------------------
 
@@ -1159,9 +1298,23 @@ let timer = null, pending = Promise.resolve();
 function tick() {
   if (!still && !stand) return;
   render(performance.now());
-  const copy = new Uint8Array(N * 4);
-  copy.set(new Uint8Array(canvas.buffer));
+  const copy = portrait ? turned() : new Uint8Array(N * 4);
+  if (!portrait) copy.set(new Uint8Array(canvas.buffer));
   parentPort.postMessage({ type: 'frame', data: copy.buffer }, [copy.buffer]);
+}
+
+// FaceTime on an upright phone shows the frame turned a quarter turn clockwise: the frame's left edge along the
+// top of the screen and its top edge down the right. So the upright picture goes into the frame turned a quarter
+// turn the other way: frame (x, y) is picture (W - 1 - y, x). TOUR_ROTATE=cw turns it the opposite way, should a
+// phone show it upside down.
+const CLOCKWISE = process.env.TOUR_ROTATE === 'cw';
+function turned() {
+  const frame = new Uint32Array(N);
+  for (let y = 0, i = 0; y < FH; y++) {
+    if (CLOCKWISE) for (let x = 0, n = (H - 1) * W + y; x < FW; x++, n -= W) frame[i++] = canvas[n];
+    else for (let x = 0, n = W - 1 - y; x < FW; x++, n += W) frame[i++] = canvas[n];
+  }
+  return frame;
 }
 
 parentPort.on('message', message => {
