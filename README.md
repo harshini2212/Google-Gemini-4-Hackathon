@@ -1,52 +1,39 @@
 # FaceTime Open House
 
-An AI agent gives a live open house over FaceTime. It walks you through an apartment using Matterport 3D scans, answers questions as you go, and can restyle the space when you ask.
+An AI guide walks a renter through a real apartment on FaceTime. The demo tours the A5 at The Parker at Ellington in Houston. The guide can plan a route, switch camera views, answer from the property record, and preview wall finishes.
 
-## Concept
+## Browser rehearsal
 
-The agent draws on three data sources:
-
-1. **Matterport 3D scans** (main source): the walkthrough itself
-2. **Area / neighborhood data**: commute, nearby places, what the area is like
-3. **Building exterior renders**
-
-Polish wins this one, not novelty. The open-house idea is strong enough as long as the demo is tight.
-
-## Why FaceTime
-
-- Hardware projects win because judges get a hands-on demo moment. FaceTime gives you that same moment on a phone.
-- Precedent: this year's Cal Hacks grand prize went to a FaceTime OS for controlling a PC.
-- **Goal: get it running on the judge's own phone during the demo.**
-
-## Architecture
-
-```
-Matterport API ──► Unity / Blender (render) ──► video stream ──► FaceTime call
-                                                        ▲
-             full-duplex LLM agent (narration + Q&A) ───┘
-             unified API merges FaceTime audio + text streams on the backend
+```sh
+npm ci
+npm run dev
 ```
 
-- Pull Matterport into Unity or Blender, then stream the render to FaceTime. Basic wiring should take under 2 hours.
-- Put a full-duplex LLM agent on top for live narration and Q&A.
-- Blender + Codex recommended for the rendering work.
+Open [localhost:5180](http://localhost:5180) in Chrome on the host Mac. The app serves prepared assets from `data/demo/`. The OpenAI key in the local `.env` enables typed questions and live conversation. Use **Talk live** to rehearse with the browser microphone.
 
-### Personalization (the demo feature)
+## Prepare the property data
 
-- Change wall colors or color schemes on command
-- Preload a few style variants so changes look like live rendering
-- Stretch goal: change the furniture style on request (e.g. "1920s vintage")
-- Precedent: we already edited a Matterport model from pristine to fire-damaged for a wildfire-insurance demo
+Use Node 22.12 or later, Blender 5.1, and Python with Pillow, NumPy, and Shapely. The local `.env` supplies the Matterport API key and token and the Vexcel API key.
 
-## Demo strategy
+```sh
+python3 -m pip install Pillow numpy shapely
+npm run prepare:demo -- --live --kit /path/to/challenge-kit
+```
 
-- Build for the demo, not the full product.
-- Total window is 5–8 min, and the core demo should land in **2–3 min**.
-- Don't stack features ("feature one, two, three, four...").
-- Preload a few realistic states, or do one simple color/style change live.
+Point `--kit` at the CoStar challenge export containing `data/apartment-listing.jsonl` and `data/commercial-property.jsonl`. On this Mac, the command defaults to the kit under the existing Brace workspace. Running `npm run prepare:demo` without `--live` reads the Matterport and Vexcel captures already cached there. Use `--cache` or `--blender` to supply alternative paths.
 
-## Next steps
+## FaceTime
 
-- [ ] Wire Matterport into Blender and stream it to FaceTime
-- [ ] Get color/style changes demo-ready
-- [ ] Message Anish about helping with the build (he's in India, so he'll be awake during the hackathon; check his bandwidth given his PR review load)
+The [Chert agent](facetime/) serves the tour video and answers the caller using the shared tour tools. From that directory, keep `npm start` and `npx @trychert/facetime@0.1.0-beta.21 dev` running in separate terminals. Wait for the agent to enter its waiting room, then place a FaceTime Video call from a verified iPhone.
+
+For a hosted screen-share rehearsal, open **FaceTime setup** and **Open tour window** on the Mac. Share that window from the FaceTime menu bar. The window follows room changes, camera turns, finishes, and guide captions from the host tab. [Apple window sharing guide](https://support.apple.com/en-mz/guide/facetime/fctmdcf2007a/mac)
+
+For voice in the hosted screen-share setup, set FaceTime **Video → Output** to one loopback device and **Video → Microphone** to a second. In the web app, select **Find audio devices**, then match **Guest → guide** to FaceTime Output and **Guide → guest** to FaceTime Microphone. Choose **Connect guide audio**. [BlackHole audio loopback](https://github.com/ExistentialAudio/BlackHole)
+
+## Two-minute walkthrough
+
+1. Ask “I work from home and drive. Can you show me a desk spot and where I’d park?” The guide opens the dining nook and adds a parking stop.
+2. Say “Next.” The aerial shows the registered scan point and a visible parking row about 35 feet away in a straight line. CoStar supplies the community-wide parking count. Confirm actual access and availability on site.
+3. Ask “Can I see the fireplace wall in soft sage?” The shared view returns to the living room and applies the Blender preview on the original Matterport scan.
+
+The layout uses measured Matterport room boundaries and connected scan points. CoStar supplies the listed area and asking-rent snapshot. Paint previews apply to the fireplace wall from the living-room scan position. [Matterport Model API](https://matterport.github.io/showcase-sdk/modelapi_home.html) · [Official OpenAI documentation for Realtime WebRTC](https://developers.openai.com/api/docs/guides/realtime-webrtc)
