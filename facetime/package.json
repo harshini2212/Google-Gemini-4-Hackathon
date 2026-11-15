@@ -12,10 +12,16 @@
     "help": "node agent.mjs --help"
   },
   "dependencies": {
+    "@langchain/anthropic": "^1.6.5",
+    "@langchain/core": "^1.4.1",
+    "@langchain/openai": "^1.8.4",
     "@livekit/agents": "1.8.0",
     "@livekit/agents-plugin-elevenlabs": "^1.8.0",
     "@livekit/agents-plugin-openai": "1.8.0",
     "@livekit/rtc-node": "0.13.35",
-    "sharp": "^0.35.3"
+    "deepagents": "^1.16.5",
+    "langchain": "^1.6.6",
+    "sharp": "^0.35.3",
+    "zod": "^4.6.7"
   }
 }

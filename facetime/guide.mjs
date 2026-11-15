@@ -113,6 +113,9 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
   const staging = await optional('./stage.mjs', {});
   const stagedDir = fileURLToPath(new URL(`${media}staged`, here));
   const presets = staging.loadPresets ? await staging.loadPresets(slug ? stagedDir : undefined) : {};
+  // The research desk (research.mjs): a Deep Agent over the listings data, for questions that need digging.
+  const desk = slug ? await optional('./research.mjs', {}) : {};
+  const deskOpen = desk.available ? await desk.available(slug) : false;
   const sweeps = new Map(tour.sweeps.map(sweep => [sweep.id, sweep]));
   const turns = await roomTurns(places, `${media}depth/`);
   const keys = Object.keys(places);
@@ -178,6 +181,22 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
     };
   };
 
+  /** A change the image model makes to exactly what the camera is facing: started now, on screen about twelve seconds later. */
+  const restyle = (view, call, request, title) => {
+    const place = places[view.at];
+    const source = view.sources[place.sweep]?.file ?? scanFile(place);
+    staging.stagePano({ source, yaw: place.yaw + (view.look?.yaw ?? 0), pitch: view.look?.pitch ?? place.pitch, request,
+      name: `${view.at}-${Date.now().toString(36)}`, ...(slug ? { outDir: stagedDir } : {}) })
+      .then(({ file }) => call.later(current => noted({ ...current, sources: { ...current.sources, [place.sweep]: { file, label: title } } }, title),
+        `The change you started is now on screen in the ${place.label}: "${title}". Tell the caller in one short sentence that the preview is up, and ask what they think.`))
+      .catch(error => {
+        console.error('[guide] staging failed:', error?.message ?? error);
+        call.later(current => current, `The preview "${title}" did not work. Say so in one short sentence and offer something else.`);
+      });
+    return { started: title, appearsIn: 'about twelve seconds', note: 'Keep talking about the room meanwhile. Do not say it is on screen yet.' };
+  };
+  const passing = key => ['entry', 'hallway'].includes(places[key].kind) || key === entrance;
+
   const pick = (values, description) => ({ type: 'string', enum: values, description });
   const tool = (name, description, properties, run) =>
     ({ name, description, parameters: { type: 'object', properties, required: Object.keys(properties), additionalProperties: false }, run });
@@ -229,10 +248,18 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
       }),
     tool('paint_wall', 'Repaint the wall in this room any colour the caller names, live on camera. You choose the hex code for the colour they said. Use color "original" to put the wall back.',
       { color: { type: 'string', description: 'Hex colour like #b3202a, or "original".' }, name: { type: 'string', description: 'The colour as you would say it, e.g. "Deep red".' } },
-      (view, { color, name }) => {
+      (view, { color, name }, call) => {
         if (view.mode !== 'interior') return { view, result: { error: 'You are not in a room. Walk to one first.' } };
-        // Paint is mapped from one spot in each room: step over to it if she is elsewhere in that room.
-        const key = nearest(view.at, k => Boolean(places[k].stop && walls[places[k].stop]));
+        // Paint is mapped from one spot in a room: step over to it from elsewhere in that room, or from a doorway or hall.
+        const mapped = k => Boolean(places[k].stop && walls[places[k].stop]);
+        const here = places[view.at];       // "this wall" in the kitchen is not the living room's wall, even in one open room
+        const key = passing(view.at) ? nearest(view.at, mapped) : [view.at, ...keys.filter(k => places[k].room === here.room && places[k].kind === here.kind)].find(mapped);
+        // No wall is mapped in this room: repaint exactly what the camera is facing with the image model instead.
+        if (!key && color !== 'original' && staging.stagePano) {
+          const said = name || color;
+          return { view, result: { ...restyle(view, call, `Repaint the wall the camera is facing in ${said} (${color}). Change only that wall's paint colour: keep the floor, ceiling, trim, windows, doors, fixtures and anything standing in the room exactly as they are.`, `Paint · ${said}`),
+            note: 'This wall has no instant paint, so the preview takes about twelve seconds. Say so, and keep talking.' } };
+        }
         if (!key) return { view, result: { error: `No wall is mapped for paint in this room. Rooms you can paint in: ${[...new Set(keys.filter(k => places[k].stop && walls[places[k].stop]).map(label))].join(', ') || 'none yet'}.` } };
         const stop = places[key].stop, paints = { ...view.paints };
         if (color === 'original') delete paints[stop];
@@ -259,16 +286,18 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
         if (view.mode !== 'interior') return { view, result: { error: 'You are not in a room. Walk to one first.' } };
         // Furniture presets are made from one spot in a room: step over to the one nearby that fits the request best.
         const words = (String(request).toLowerCase().match(/[a-z]{3,}/g) ?? []).filter(word => !['the', 'and', 'for', 'put', 'add', 'here', 'this', 'that', 'room', 'with', 'some', 'make', 'can', 'you', 'show', 'furnish', 'furniture'].includes(word));
-        const fit = item => words.filter(word => `${item.id} ${item.label} ${item.request ?? ''}`.toLowerCase().includes(word)).length;
+        // A preset is used only when the request names it (its id or label) or is simply "furnish this": asking for one lamp
+        // must not bring in a whole furnished room.
+        const fit = item => words.filter(word => `${item.id} ${item.label}`.toLowerCase().includes(word)).length;
         const offers = around(view.at).flatMap((key, order) => (presets[places[key].stop] ?? []).map(item =>
           ({ key, item, score: (item.id === preset && key === view.at ? 100 : 0) + fit(item) * 10 + (key === view.at ? 5 : 0) - order / 100 })));
         const best = offers.sort((a, b) => b.score - a.score)[0];
         // Step away only for a preset that fits what was asked, or from a doorway or hall, which has no room of its own to furnish.
-        const passing = ['entry', 'hallway'].includes(places[view.at].kind) || view.at === entrance;
-        const at = best && (best.key === view.at || (!(presets[places[view.at].stop] ?? []).length && (best.score >= 10 || passing))) ? best.key : view.at;
+        const at = best && (best.key === view.at || (!(presets[places[view.at].stop] ?? []).length && (best.score >= 10 || passing(view.at)))) ? best.key : view.at;
         const place = places[at], offered = presets[place.stop] ?? [];
         const generic = words.length === 0;      // "furnish this room": any preset made for this spot will do
         const ready = offered.find(item => item.id === preset) ?? (best?.key === at && (at !== view.at || best.score >= 10 || generic) ? best.item : null);
+        const look = at === view.at ? view.look : null;     // a live change is made to what she is facing, so she keeps facing it
         view = standAt(view, at);
         // The same the other way round: furniture goes into the room as scanned, so paint at this spot comes off.
         const paints = { ...view.paints }, unpainted = Boolean(place.stop && paints[place.stop]);
@@ -277,15 +306,8 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
         if (ready) return { view: noted({ ...standAt(view, view.at), paints, sources: { ...view.sources, [place.sweep]: { file: ready.file, label: ready.label } } }, ready.label),
           result: { onScreen: ready.label, note: 'This is an AI staging preview. Say so.', ...unpaintedNote } };
         if (!staging.stagePano) return { view, result: { error: 'Furniture staging is not available right now. Offer a paint colour instead.' } };
-        const source = view.sources[place.sweep]?.file ?? scanFile(place), title = String(request).slice(0, 34);
-        staging.stagePano({ source, yaw: place.yaw, pitch: place.pitch, request, name: `${view.at}-${Date.now().toString(36)}`, ...(slug ? { outDir: stagedDir } : {}) })
-          .then(({ file }) => call.later(current => noted({ ...current, sources: { ...current.sources, [place.sweep]: { file, label: title } } }, title),
-            `The staging preview you started is now on screen in the ${place.label}: "${request}". Tell the caller in one short sentence and ask what they think.`))
-          .catch(error => {
-            console.error('[guide] staging failed:', error?.message ?? error);
-            call.later(current => current, `The staging preview for "${request}" did not work. Say so in one short sentence and offer a preset or a paint colour instead.`);
-          });
-        return { view: { ...standAt(view, view.at), paints }, result: { started: request, appearsIn: 'about twelve seconds', note: 'Keep talking about the room meanwhile. Do not say it is on screen yet.', ...unpaintedNote } };
+        view = { ...view, look, paints };
+        return { view, result: { ...restyle(view, call, `${request}. Change only that: keep everything else in the room exactly as it is.`, String(request).slice(0, 30)), ...unpaintedNote } };
       }),
     tool('clear_changes', 'Put the room on camera back to how it was scanned: remove the furniture preview, the paint, or both.',
       { what: pick(['furniture', 'paint', 'both'], 'What to remove.') }, (view, { what }) => {
@@ -302,6 +324,22 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
       {}, view => ({ view: { ...view, mode: 'plan', look: null },
         result: { onScreen: 'Floor plan drawn from the Matterport scan', presentThis: talkingPoints.floorplan } })),
   ];
+
+  if (deskOpen) tools.push(tool('research', 'Hand a question that needs digging to your research desk, a team of agents that searches the CoStar listings data: similar homes nearby and how this one compares, price per square foot in the area, what the listing record, the remarks and the scan disagree on, or a monthly payment from the caller\'s own down payment and rate. It takes about twenty seconds: say you are looking into it and carry on with the tour; you are told when the answer is on screen. Use it for these questions instead of answering from memory.',
+    { question: { type: 'string', description: 'The caller\'s question in full, with any numbers they gave.' } },
+    (view, { question }, call) => {
+      desk.research(question, slug)
+        .then(answer => {
+          console.log(`[guide] research desk answered in ${answer.seconds} s: ${answer.card.title}`);
+          call.later(current => ({ ...current, mode: 'card', look: null, card: answer.card }),
+            `Your research desk has answered "${question}", and its findings are on screen as a card. Tell the caller, in your own words and no more than three sentences: ${answer.spoken} Then offer to carry on with the tour (walk_to brings the camera back).`);
+        })
+        .catch(error => {
+          console.error('[guide] research failed:', error?.message ?? error);
+          call.later(current => current, `Your research desk could not answer "${question}". Say so in one sentence and say you will confirm with ${persona.office}.`);
+        });
+      return { view, result: { started: question, backIn: 'about twenty seconds', note: 'Say you are having that looked into, then carry on. Do not guess the answer.' } };
+    }));
 
   const NEXT = { in_person_showing: 'Book an in-person showing', send_details: 'Send the details and this recap',
     thinking_it_over: 'Taking time to think it over', not_for_me: 'Not the right fit' };
@@ -326,8 +364,14 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
       const folder = new URL('./visits/', here);
       mkdir(folder, { recursive: true }).then(() => writeFile(new URL(`${note.at.replace(/[:.]/g, '-')}.json`, folder), JSON.stringify(note, null, 2) + '\n'))
         .catch(error => console.error('[guide] could not save the visit note:', error?.message ?? error));
+      // After the call the research desk turns the note into a follow-up for the visitor and a brief for the listing side.
+      if (deskOpen) desk.followUp(note, fileURLToPath(new URL(`./visits/${note.at.replace(/[:.]/g, '-')}/`, here)), slug)
+        .then(files => console.log(`[guide] follow-up packet written: ${files.join(', ')}`))
+        .catch(error => console.error('[guide] follow-up failed:', error?.message ?? error));
       return { view: { ...view, mode: 'card', look: null, card },
-        result: { onScreen: 'A recap of the visit', saved: `A note for ${persona.office}`, say: 'Read the recap back in two short sentences, thank them by name, and say goodbye warmly.' } };
+        result: { onScreen: 'A recap of the visit', saved: `A note for ${persona.office}`,
+          ...(deskOpen ? { followUp: 'Your research desk is writing a follow-up with comparable homes for them and a brief for ' + persona.office + '. Mention it in a few words.' } : {}),
+          say: 'Read the recap back in two short sentences, thank them by name, and say goodbye warmly.' } };
     }));
 
   const instructions = `You are Ellie, the open-house guide for ${persona.who}.
@@ -377,10 +421,19 @@ CLOSING THE VISIT
 - When they have seen what they came for, or say they are done: ask what stood out and offer a next step (an
   in-person showing, sending the details, or time to think). Then call wrap_up, read the recap back, and say goodbye.
 
-CHANGING THE PLACE
+${deskOpen ? `YOUR RESEARCH DESK
+- For comparisons with other homes, price per square foot in the area, what the records disagree on, or a monthly
+  payment from the caller's own numbers, call research: a team of agents works it out from the CoStar listings while
+  you carry on. Say you are having it looked into, keep touring, and report when you are told it is on screen.
+  Never guess at those.
+
+` : ''}CHANGING THE PLACE
 - Any wall colour: paint_wall, at once. Furniture and finishes: stage_room. Call every change a preview out loud
   ("here's a paint preview", "this is a staging preview"). A change stays at the spot where you made it.
-- After a change, ask what they think or offer one alternative. To undo, clear_changes.
+- Make exactly the change that was asked for, one at a time, and pass the caller's own words as the request: "add a
+  lamp" adds a lamp, it does not furnish the room. A change is made to what the camera is facing, so if they mean a
+  particular wall, corner or window, look or point there first, then make the change.
+- After a change, say what changed, ask what they think or offer one alternative. To undo, clear_changes.
 
 HONESTY
 - Use only the property brief below and tool results. For anything the brief lists as not in the data, say you

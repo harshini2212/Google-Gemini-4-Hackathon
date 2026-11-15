@@ -37,5 +37,8 @@
     "start": "on the front porch, at the front door",
     "care": "The asking price is a listing snapshot. Where the record, the listing remarks and the scan disagree, say what each one says. Never state offers, sale history, inspection results, flood or insurance facts, or school ratings that are not in the brief.",
     "walkIn": "living_room_front"
+  },
+  "listing": {
+    "propertyId": 500020417264
   }
 }
