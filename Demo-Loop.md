@@ -1,6 +1,16 @@
 # Demo Loop
 
-The only thing that matters is two minutes on a phone. Everything we build either makes those two minutes better or gets cut.
+The only thing that matters is a few minutes on a phone. Everything we build either makes those minutes better or gets cut.
+
+## The slot
+
+| Part | Length | What it is |
+| --- | --- | --- |
+| Video | 3 min | A recorded real call running the loop below, cut tight, with the pitch over the first 20 seconds |
+| Live demo | 3 min | The same loop on a real phone, then a judge takes over and asks whatever they like |
+| Q&A | 3 min | Answers below, under "Questions we will get" |
+
+**The pitch in one line:** tour a home that is far away without going there. It is faster, it is safer than meeting a stranger in an empty unit, and the guide is available at any hour.
 
 ## The dream, in one breath
 
@@ -32,11 +42,11 @@ One caller, one unbroken call. Times are targets for the presenter, not rules fo
 
 | Time | Caller says | She does | On the phone | Proves |
 | --- | --- | --- | --- | --- |
-| 0:00 | *(dials, it rings)* | Picks up at the front door. "Hi, I'm Ellie, your guide for the A5 at The Parker at Ellington. Come on in. What matters most to you in a place?" | Handheld view from the entry, looking into the unit | It is a phone call. Hands-on moment |
+| 0:00 | *(dials, it rings)* | Picks up at the front door. "Hi, I'm Ellie, your AI guide for the A5 at The Parker at Ellington. Come on in. What matters most to you in a place?" | Handheld view from the entry, looking into the unit | It is a phone call. Hands-on moment |
 | 0:12 | "I work from home and I drive." | Plans out loud: "Then three things: a spot for your desk, the living room, and where you'd park. Follow me." Starts walking. | Camera turns and walks through the unit | Agentic: plans, then acts |
 | 0:25 | *(listening)* | Arrives at the dining nook. "This nook measures about 48 square feet in the scan, with the window right here." | Dining nook, window in frame | Matterport measurements |
 | 0:40 | "Can you put a desk there?" | "Sure. Here's a staging preview." | Desk, chair and monitor wipe into the room | She changes the building |
-| 0:55 | "Show me the living room." | Walks there. "Fireplace on this wall, patio through the doors on the right." | Walk, then living room | Spatial awareness |
+| 0:55 | "Let's go to the living room." | Walks there and presents it like a guide: the size from the scan, the stone fireplace, the vaulted ceiling, the patio doors, built 1983 and renovated 2013. | Walk, then living room | Spatial awareness, knows the place |
 | 1:05 | "Could that wall be red?" | "Let's see it." | Red rolls across the fireplace wall, shadows intact | The wow beat |
 | 1:15 | "What's the rent?" | "Asking rent is 829 to 879 a month in the CoStar listing. It's listed at 700 square feet; the scan measures 611 indoors." | Same room, still red | CoStar and Matterport joined, honestly |
 | 1:28 | "What's behind you?" | Turns around and describes what is actually there. | Camera swings 180 degrees | She knows what her camera sees |
@@ -44,6 +54,10 @@ One caller, one unbroken call. Times are targets for the presenter, not rules fo
 | 1:52 | *(presenter)* | "Text the join code to this number and FaceTime her yourself." | Floor plan with her route on it | Judge's own phone |
 
 If a judge goes off script, that is the demo working. Every room is walkable, every question either has a sourced answer or an honest "I'll confirm".
+
+The live demo runs the same beats in three minutes, which leaves about a minute for a judge to drive. In the video, the pitch line and the phone ringing cover the first 20 seconds.
+
+Everything on camera is the Matterport 360 photography taken inside the unit, one photo per scan position, fifteen positions. The 3D mesh is never shown.
 
 ## Why these beats
 
@@ -105,10 +119,20 @@ Repeat until every row above is green, then stop building.
 - A furniture request she has not seen before takes tens of seconds. The loop uses presets; she fills the wait by talking.
 - The exterior is one aerial frame. It is a single beat, not a place to linger.
 
+## Questions we will get
+
+| Question | Answer |
+| --- | --- |
+| Is that a real apartment? | Yes. The A5 at The Parker at Ellington in Houston, from its Matterport scan, CoStar record and Vexcel aerial. |
+| Is the video pre-rendered? | No. Each frame is drawn live from the 360 photo at her position, in the direction she is facing. Paint and furniture are applied to that photo during the call. |
+| What stops her making things up? | She speaks only from the property brief built from the three data layers and from what each tool tells her is in frame. For anything else she says she will confirm with the leasing office. |
+| How does it reach FaceTime? | The agent is a LiveKit participant with one audio and one video track. Chert bridges that room to a real Apple line. |
+| How would this scale past one unit? | Every step is generated from the scan and the record: the places, what is visible from each, the brief. A new listing is a data run, not a rebuild. |
+| Who is it for? | Renters relocating from another city, leasing offices after hours, and anyone who would rather not tour an empty unit alone with a stranger. |
+
 ## After the loop is clean
 
 In order, and only if rows 1 to 12 are green:
 
-1. Parallax walking: the floor slides under the camera between scan points.
-2. She texts the caller a recap and the floor plan over iMessage after the call.
-3. Portrait video, if a real call shows landscape wastes the phone screen.
+1. She texts the caller a recap and the floor plan over iMessage after the call.
+2. Portrait video, if a real call shows landscape wastes the phone screen.

@@ -31,6 +31,8 @@ const toSrgb = Uint8Array.from({ length: 4097 }, (_, index) => {
   return Math.round(255 * (linear <= 0.0031308 ? linear * 12.92 : 1.055 * linear ** (1 / 2.4) - 0.055));
 });
 const GRAY = toLinear[160];              // the brightness the unpainted wall is treated as
+const SHEEN = 0.02;                      // light a painted wall reflects whatever its colour: keeps black and pure red from looking flat
+const KNEE = 0.7;                        // above this the paint rolls off towards white instead of clipping (light colours on a sunlit wall)
 
 /**
  * A painted copy of a panorama.
@@ -40,14 +42,18 @@ const GRAY = toLinear[160];              // the brightness the unpainted wall is
  */
 export function tintPano(source, mask, [red, green, blue]) {
   const out = new Uint32Array(source);
-  const tr = toLinear[red] / GRAY, tg = toLinear[green] / GRAY, tb = toLinear[blue] / GRAY;
+  const paint = (value) => (toLinear[value] * (1 - SHEEN) + SHEEN) / GRAY;
+  const tr = paint(red), tg = paint(green), tb = paint(blue);
+  const peak = Math.max(tr, tg, tb), room = 1 - KNEE;
   for (let i = 0; i < source.length; i++) {
     const amount = mask[i];
     if (amount === 0) continue;
     const pixel = source[i];
     const r = toLinear[pixel & 255], g = toLinear[(pixel >>> 8) & 255], b = toLinear[(pixel >>> 16) & 255];
-    const brightness = 0.2126 * r + 0.7152 * g + 0.0722 * b, a = amount / 255;
-    const mix = (photo, paint) => toSrgb[Math.round(Math.min(photo + (brightness * paint - photo) * a, 1) * 4096)];
+    let brightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const top = brightness * peak, a = amount / 255;   // the brightest channel of the painted pixel
+    if (top > KNEE) brightness *= (KNEE + room * (1 - Math.exp((KNEE - top) / room))) / top;
+    const mix = (photo, tint) => toSrgb[Math.round(Math.min(photo + (brightness * tint - photo) * a, 1) * 4096)];
     out[i] = 0xff000000 | (mix(b, tb) << 16) | (mix(g, tg) << 8) | mix(r, tr);
   }
   return out;
