@@ -20,6 +20,8 @@
 //   walk.json          optional (scripts/prepare_walk.py): the sweeps a person can walk between, in place of tour.sweeps,
 //                      and panoramas of sweeps that are not stops
 //   walls/             optional: index.json and the wall masks for view.paints
+//   depth/             optional (scripts/make_depth.py): how far the room is from each sweep, for walking for real
+//                      (only with OPEN_HOUSE_DEPTH=1)
 //   <stop>-<finish>.webp   optional: the stop repainted, for view.finish
 import { spawn } from 'node:child_process';
 import { access, open, readFile } from 'node:fs/promises';
@@ -739,9 +741,10 @@ function turnRound(now) {
 }
 
 /** The steps of a walk along a path of sweeps, each with the pictures at both ends and the way it faces. */
-function hopsAlong(path, first, looks) {
+function hopsAlong(path, first, looks, rooms) {
   return path.slice(1).map((id, index) => {
     const from = sweeps.get(path[index]), to = sweeps.get(id), length = Math.hypot(to.x - from.x, to.y - from.y);
+    const real = walkable(from, to) && rooms.get(from.id) && rooms.get(id) && !(index === 0 && first.before);
     return {
       from, to, heading: bearing(from, to),
       a: index === 0 ? first : { source: looks.get(from.id).source },
@@ -750,6 +753,8 @@ function hopsAlong(path, first, looks) {
       push: clamp(1 + length / 2.6, 1.25, 1.8),
       // A long step, across a yard or down a drive, takes longer in proportion to its length.
       slow: Math.max(1, length / LONG),
+      // The rooms at both ends, where the step is walked for real. Not from a picture that is still rolling in.
+      deep: real ? [rooms.get(from.id), rooms.get(id)] : null,
     };
   });
 }
@@ -847,6 +852,105 @@ function lensAt(sweep, scale) {
   return lens;
 }
 
+// ---- walking for real -------------------------------------------------------------------------------------------------
+
+// Where the bundle has the depth of its rooms (depth/, or media/depth for the first bundle), a step between two
+// scan positions can be the camera really going from one to the other: both panoramas are redrawn from where the
+// camera is (depthwalk.mjs), so the floor and the walls slide past as they would.
+// It is off unless OPEN_HOUSE_DEPTH=1. Across an open room it reads as walking; past a door leaf, a counter or
+// anything else close by, the picture tears and smears for a second, which looks worse than the dissolve.
+// Off, or when anything goes wrong with it, a step is the push-in and dissolve it always was.
+const depthDir = process.env.OPEN_HOUSE_DEPTH !== '1' ? null
+  : await exists(join(mediaDir, 'depth/index.json')) ? join(mediaDir, 'depth') : legacy ? join(here, 'media/depth') : null;
+const depthIndex = depthDir ? await json(join(depthDir, 'index.json')) : null;
+let walker = depthIndex?.sweeps ? await import('./depthwalk.mjs').catch(error => { report(error); return null; }) : null;
+
+/**
+ * Whether a step between two sweeps is walked for real: a way the scan says can be walked (not two joined into
+ * one), no longer than the depth is good for, between rooms whose depth is worth walking with.
+ */
+function walkable(from, to) {
+  if (!walker) return false;
+  const a = depthIndex.sweeps[from.id], b = depthIndex.sweeps[to.id];
+  return Boolean(a && b) && !a.flat && !b.flat && !shapeless.has(from.id) && !shapeless.has(to.id) && !from.levelOnly && !to.levelOnly
+    && from.neighbors.includes(to.id) && Math.hypot(to.x - from.x, to.y - from.y) <= (depthIndex.reach ?? Infinity);
+}
+
+/** The sweeps along a way whose rooms a walk needs: both ends of every step walked for real. */
+const roomsAlong = path => [...new Set((path ?? []).slice(1).flatMap((id, index) => walkable(sweeps.get(path[index]), sweeps.get(id)) ? [path[index], id] : []))];
+
+const SHAPES = 4;                          // rooms kept ready after a walk, 5 MB each: the next walk mostly starts among them
+const shapes = new Map();                  // sweep id -> its room as depthwalk reads it, the one last asked for last
+const shapeless = new Set();               // sweeps whose depth could not be read
+const speck = new Float32Array(8);
+
+/**
+ * A sweep's room, ready to walk in, or null where its depth cannot be read. Making it quick to ask takes 25 ms,
+ * so it is done here, one room at a time between frames, and not on the first frame of a step.
+ */
+async function shape(id) {
+  let room = shapes.get(id);
+  if (!room) {
+    try {
+      const { file, x, y, z, bearing0, lean } = depthIndex.sweeps[id], { width, height } = depthIndex;
+      const bytes = await readFile(join(depthDir, file));
+      if (bytes.length !== width * height * 4) throw new Error(`${file} is not ${width} x ${height} distances`);
+      room = { depth: new Float32Array(bytes.buffer, bytes.byteOffset, width * height), width, height, x, y, z, bearing0, lean: lean ?? null, flat: false };
+      await breath();
+      walker.warpGrid(room, { x, y, z, yaw: 0 }, G, G, G, speck);
+    } catch (error) {
+      report(`No depth for the sweep ${id}: ${error?.message ?? error}`);
+      shapeless.add(id);
+      return null;
+    }
+  }
+  shapes.delete(id);
+  shapes.set(id, room);
+  while (shapes.size > SHAPES) shapes.delete(shapes.keys().next().value);
+  return room;
+}
+
+// Where each frame pixel lands in the panorama behind and in the one ahead, how far each is to be trusted there,
+// and how much of the one ahead to lay over the one behind: all at the corners of the same 8 px cells.
+const warp = walker && { a: new Float32Array(2 * GW * GH), b: new Float32Array(2 * GW * GH),
+  trustA: new Float32Array(GW * GH), trustB: new Float32Array(GW * GH), amounts: new Float32Array(GW * GH) };
+const feet = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, fov: 60, lean: null };
+
+/**
+ * A frame of a step walked for real, `p` of the way: the camera is that far between the two sweeps, turned and
+ * held as on any other frame, and sees both panoramas from there. Each is the plain view at its own end.
+ */
+function drawStep(out, hop, p) {
+  const [A, B] = hop.deep;
+  feet.x = A.x + (B.x - A.x) * p; feet.y = A.y + (B.y - A.y) * p; feet.z = A.z + (B.z - A.z) * p;
+  feet.pitch = pose.pitch; feet.roll = pose.roll; feet.fov = 2 * Math.atan(TAN / pose.zoom) / DEG;
+  feet.lean = walker.leanBetween(A, B, p);
+  feet.yaw = turn(hop.from.offset - pose.dir);
+  walker.warpGrid(A, feet, W, H, G, warp.a, warp.trustA);
+  feet.yaw = turn(hop.to.offset - pose.dir);
+  walker.warpGrid(B, feet, W, H, G, warp.b, warp.trustB);
+  walker.drawWarped(out, hop.a.source, warp.a, W, H, G);
+  walker.drawWarped(out, hop.b.source, warp.b, W, H, G, walker.mixWarped(warp.trustA, warp.trustB, p, warp.amounts));
+}
+
+/**
+ * A real step drawn to nowhere before the first call: the first time through, before the engine has made it
+ * quick, a frame takes several frames' time. This takes most of that out of the first walk, not all: a frame
+ * or two early in a call can still take 70 ms.
+ */
+async function limber() {
+  for (const from of sweeps.values()) {
+    const to = scans.has(from.id) && from.neighbors.map(id => sweeps.get(id)).find(to => to && scans.has(to.id) && walkable(from, to));
+    if (!to) continue;
+    const A = await shape(from.id), B = await shape(to.id);
+    if (!A || !B) return;
+    const hop = { from, to, deep: [A, B], a: { source: await scan(from) }, b: { source: await scan(to) } };
+    pose.dir = bearing(from, to);
+    for (const p of [0.02, 0.2, 0.5, 0.8, 0.98, 0.03, 0.5]) drawStep(spare, hop, p);
+    return;
+  }
+}
+
 // ---- scenes ---------------------------------------------------------------------------------------------------------
 
 let still = null;                             // the aerial or the plan, when that is on screen instead of the camera
@@ -874,11 +978,22 @@ function drawCaption(out, now) {
 
 function drawInterior(out, now) {
   if (walk) {
-    // A step: push in on the picture behind while the picture ahead, a little wide at first, comes through it.
+    // A step: walked for real where it can be. Otherwise push in on the picture behind while the picture ahead, a
+    // little wide at first, comes through it.
     const index = Math.min(Math.floor(walk.at), walk.hops.length - 1), hop = walk.hops[index], p = walk.at - index;
-    const through = Math.round(smooth((p - 0.2) / 0.55) * 256);
-    if (through < 256) drawLayer(out, hop.a, lensAt(hop.from, hop.push ** p), 256, now);
-    if (through > 0) drawLayer(out, hop.b, lensAt(hop.to, hop.push ** ((p - 1) * 0.7)), through, now);
+    if (hop.deep) {
+      try { drawStep(out, hop, p); }
+      catch (error) {                         // never at the cost of the picture: every step from here on is the dissolve
+        report(error);
+        walker = null;
+        for (const other of walk.hops) other.deep = null;
+      }
+    }
+    if (!hop.deep) {
+      const through = Math.round(smooth((p - 0.2) / 0.55) * 256);
+      if (through < 256) drawLayer(out, hop.a, lensAt(hop.from, hop.push ** p), 256, now);
+      if (through > 0) drawLayer(out, hop.b, lensAt(hop.to, hop.push ** ((p - 1) * 0.7)), through, now);
+    }
   } else {
     drawLayer(out, stand.layer, lensAt(stand.sweep, 1), 256, now);
   }
@@ -940,18 +1055,19 @@ async function show(view) {
     const path = !still && from() && from() !== place.sweep ? route(from().id, place.sweep.id) : null;
     return path && shorten(path);
   };
-  const looks = new Map();
+  const looks = new Map(), rooms = new Map();
   let path = way(), dressed, captionLayer, blank;
   do {
     const ids = [...new Set([place.sweep.id, ...(path ?? [])])];
     tidy(ids);
     await load(ids);
     for (const id of ids) if (!looks.has(id)) looks.set(id, await dress(view, id));
+    for (const id of roomsAlong(path)) if (!rooms.has(id)) rooms.set(id, await shape(id));
     dressed = looks.get(place.sweep.id);
     captionLayer = await overlay({ title: place.label, detail: place.detail, source: dressed.credit, chip: dressed.chip });
     blank = await overlay({});
     path = way();                             // a walk under way has moved on meanwhile: the way from where it is now
-  } while (path?.some(id => !looks.has(id)));
+  } while (path?.some(id => !looks.has(id)) || roomsAlong(path).some(id => !rooms.has(id)));
 
   const now = performance.now();
   const start = from();
@@ -978,10 +1094,10 @@ async function show(view) {
       // Already walking: finish the step under way, then go on from where it ends.
       const index = Math.min(Math.floor(walk.at), walk.hops.length - 1);
       walk.hops.length = index + 1;
-      walk.hops.push(...hopsAlong(path, walk.hops[index].b, looks));
+      walk.hops.push(...hopsAlong(path, walk.hops[index].b, looks, rooms));
       Object.assign(walk, { to, titled: false, pace: Math.max(walk.pace, paceFor(walk.hops.slice(index + 1), walk.hops[index].heading)) });
     } else {
-      const hops = hopsAlong(path, stand.layer, looks);
+      const hops = hopsAlong(path, stand.layer, looks, rooms);
       walk = { hops, at: 0, speed: 0, pace: paceFor(hops, eye.dir.b), to, titled: false };
     }
     setCaption(blank, now);
@@ -1023,5 +1139,6 @@ parentPort.on('message', message => {
 let total = 0;
 const first = [...sweeps.values()].filter(sweep => sweep.file && (total += sweep.bytes) <= ROOM).map(sweep => sweep.id);
 await load(first).catch(report);
+if (walker) await limber().catch(report);
 if (tour.site) await siteImage().catch(report);
 parentPort.postMessage({ type: 'ready' });
