@@ -1,8 +1,9 @@
 # FaceTime open-house guide
 
-The open-house guide as a FaceTime Video call, through [Chert](https://www.trychert.com). The caller hears the
-guide and sees the apartment tour as her camera. It is a LiveKit agent: an OpenAI Realtime voice plus one video
-track drawn from the Matterport panoramas in `../data/demo`.
+Ellie, the open-house guide, as a FaceTime Video call through [Chert](https://www.trychert.com). The caller hears
+her and sees the home as her camera. It is a LiveKit agent: OpenAI Realtime hears and decides, ElevenLabs speaks, and
+one video track is drawn from a property's Matterport 360 photos. What the product is and how it works is in
+[`../README.md`](../README.md).
 
 The script for the demo and what still has to be true is in [`../Demo-Loop.md`](../Demo-Loop.md).
 
