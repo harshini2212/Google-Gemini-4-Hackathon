@@ -137,9 +137,9 @@ function caption({ title = '', detail = '', source = '', chip }) {
   const pill = Math.min(Math.round(93 + 19 * span(header) + 0.4 * header.length), 1200);
   return `
     <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.72"/>
+      <stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.6"/>
     </linearGradient></defs>
-    <rect x="0" y="470" width="1280" height="250" fill="url(#shade)"/>
+    <rect x="0" y="520" width="1280" height="200" fill="url(#shade)"/>
     <g ${SANS} text-anchor="middle">
       ${header ? `<rect x="${640 - pill / 2}" y="26" width="${pill}" height="40" rx="20" fill="#0d1413" fill-opacity="0.62"/>
       <circle cx="${640 - pill / 2 + 28}" cy="46" r="6" fill="#ff5a4e"/>
@@ -216,6 +216,41 @@ function inside([x, y], polygon) {
 }
 
 /** The floor plan from the scan's room boundaries, with the room and spot the camera stands in and the planned route marked. */
+/** Words broken into lines of about `width` letters, for a card: there is nothing here that wraps text. */
+function lines(text, width) {
+  const out = [''];
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    if ((out.at(-1) + ' ' + word).trim().length > width) out.push(word);
+    else out[out.length - 1] = (out.at(-1) + ' ' + word).trim();
+  }
+  return out;
+}
+
+/** A card of words in place of the camera: the recap of a visit. view.card = { title, rows: [{ label, text }], footer }. */
+async function cardImage(card) {
+  let y = 212;
+  const rows = (card.rows ?? []).slice(0, 6).map(row => {
+    const text = lines(row.text, 74).slice(0, 2);
+    const block = `<text x="190" y="${y}" font-size="14" font-weight="600" fill="#fff" fill-opacity="0.55" letter-spacing="2.4">${esc(String(row.label).toUpperCase())}</text>`
+      + text.map((line, index) => `<text x="190" y="${y + 32 + index * 32}" font-size="25" fill="#fff">${esc(line)}</text>`).join('');
+    y += 44 + text.length * 32;
+    return block;
+  }).join('');
+  const pill = Math.min(Math.round(93 + 19 * span(header) + 0.4 * header.length), 1200);
+  return pixels(svg(`<rect width="1280" height="720" fill="#18211f"/>
+    <g ${SANS}>
+      <g text-anchor="middle">
+        <rect x="${640 - pill / 2}" y="26" width="${pill}" height="40" rx="20" fill="#0d1413" fill-opacity="0.62"/>
+        <circle cx="${640 - pill / 2 + 28}" cy="46" r="6" fill="#ff5a4e"/>
+        <text x="648" y="53" font-size="19" font-weight="500" fill="#fff" letter-spacing="0.4">${esc(header)}</text>
+        <text x="640" y="148" ${SERIF} font-size="52" fill="#fff">${esc(card.title ?? 'Visit recap')}</text>
+        <text x="640" y="694" font-size="14" font-weight="600" fill="#fff" fill-opacity="0.7" letter-spacing="2.4">${esc(String(card.footer ?? '').toUpperCase())}</text>
+      </g>
+      <rect x="150" y="176" width="980" height="1" fill="#fff" fill-opacity="0.18"/>
+      ${rows}
+    </g>`));
+}
+
 async function planImage(view, place) {
   const rooms = tour.rooms ?? [];
   if (!rooms.length) throw new Error('The bundle has no floor plan: tour.json needs rooms');
@@ -1037,8 +1072,9 @@ function cut(now) {
 async function show(view) {
   const place = placeOf(view);
   if (!place) throw new Error(view.place ? `No panorama for the sweep ${view.place.sweep}` : `No panorama for the stop ${view.stop}`);
-  if (view.mode === 'site' || view.mode === 'plan') {
+  if (view.mode === 'site' || view.mode === 'plan' || view.mode === 'card') {
     const next = view.mode === 'site' ? { place: 'site', image: await siteImage(), push: 0.08 }
+      : view.mode === 'card' ? { place: `card:${JSON.stringify(view.card ?? {})}`, image: await cardImage(view.card ?? {}) }
       : { place: `plan:${place.sweep.id}:${(view.route ?? []).join('>')}`, image: await planImage(view, place) };
     if (still?.place === next.place) return;
     const now = performance.now();

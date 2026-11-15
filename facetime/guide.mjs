@@ -1,6 +1,6 @@
 // Ellie, the open-house guide: who she is, what she knows, where she can stand, and what she can do on a call.
 // There is no LiveKit in this file, so the guide can be exercised without a call.
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const here = new URL('./', import.meta.url);
@@ -136,9 +136,11 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
   /** The view the screen draws: where she stands, which way she looks, and what she has changed. */
   const standAt = (view, key) => {
     const place = places[key];
-    return { ...view, mode: 'interior', look: null, at: key, stop: place.stop ?? view.stop,
+    const trail = view.trail?.at(-1) === key ? view.trail : [...(view.trail ?? []), key];
+    return { ...view, mode: 'interior', look: null, at: key, stop: place.stop ?? view.stop, trail,
       place: { sweep: place.sweep, yaw: place.yaw, pitch: place.pitch, label: place.label, detail: place.detail } };
   };
+  const noted = (view, change) => ({ ...view, changes: [...new Set([...(view.changes ?? []), change])] });
   const initialView = () => standAt({ mode: 'interior', stop: 'living', finish: 'original', route: [], path: [], paints: {}, sources: {} }, entrance);
 
   /** Start one slow turn through the room where she stands: the whole circle, or the arc that faces the room. */
@@ -244,7 +246,8 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
         // Paint would tint furniture standing in front of the wall, so a furniture preview at this spot comes out first.
         const sources = { ...view.sources }, cleared = color !== 'original' && Boolean(sources[places[key].sweep]);
         if (cleared) delete sources[places[key].sweep];
-        return { view: { ...standAt(view, key), look: facing, paints, sources },
+        return { view: color === 'original' ? { ...standAt(view, key), look: facing, paints, sources }
+            : noted({ ...standAt(view, key), look: facing, paints, sources }, `${name || 'paint'} on ${walls[stop].label}`),
           result: color === 'original' ? { wall: walls[stop].label, restored: 'the scanned wall' }
             : { wall: walls[stop].label, painted: name, note: 'This is a paint preview on the Matterport scan. Say so.',
               ...(cleared ? { furnitureRemoved: 'The furniture preview here was taken out so the wall shows. Say so in a few words.' } : {}) } };
@@ -271,12 +274,12 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
         const paints = { ...view.paints }, unpainted = Boolean(place.stop && paints[place.stop]);
         if (unpainted) delete paints[place.stop];
         const unpaintedNote = unpainted ? { paintRemoved: 'The paint preview here was taken off to show the furniture. Say so in a few words.' } : {};
-        if (ready) return { view: { ...standAt(view, view.at), paints, sources: { ...view.sources, [place.sweep]: { file: ready.file, label: ready.label } } },
+        if (ready) return { view: noted({ ...standAt(view, view.at), paints, sources: { ...view.sources, [place.sweep]: { file: ready.file, label: ready.label } } }, ready.label),
           result: { onScreen: ready.label, note: 'This is an AI staging preview. Say so.', ...unpaintedNote } };
         if (!staging.stagePano) return { view, result: { error: 'Furniture staging is not available right now. Offer a paint colour instead.' } };
         const source = view.sources[place.sweep]?.file ?? scanFile(place), title = String(request).slice(0, 34);
         staging.stagePano({ source, yaw: place.yaw, pitch: place.pitch, request, name: `${view.at}-${Date.now().toString(36)}`, ...(slug ? { outDir: stagedDir } : {}) })
-          .then(({ file }) => call.later(current => ({ ...current, sources: { ...current.sources, [place.sweep]: { file, label: title } } }),
+          .then(({ file }) => call.later(current => noted({ ...current, sources: { ...current.sources, [place.sweep]: { file, label: title } } }, title),
             `The staging preview you started is now on screen in the ${place.label}: "${request}". Tell the caller in one short sentence and ask what they think.`))
           .catch(error => {
             console.error('[guide] staging failed:', error?.message ?? error);
@@ -300,6 +303,33 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
         result: { onScreen: 'Floor plan drawn from the Matterport scan', presentThis: talkingPoints.floorplan } })),
   ];
 
+  const NEXT = { in_person_showing: 'Book an in-person showing', send_details: 'Send the details and this recap',
+    thinking_it_over: 'Taking time to think it over', not_for_me: 'Not the right fit' };
+  tools.push(tool('wrap_up', 'Close the visit, as a guide does at the door: record who toured, what they liked, anything they want checked, and the next step they chose. Shows a recap of the visit on screen and leaves a note for the ' + persona.office.replace(/^the /, '') + '. Call it when the caller is finishing, after you have asked their name and what stood out.',
+    { name: { type: 'string', description: 'The caller\'s first name, or an empty string if they did not give one.' },
+      liked: { type: 'string', description: 'What they liked, in a short phrase in your words.' },
+      concerns: { type: 'string', description: 'Questions or concerns to follow up on, or an empty string.' },
+      next_step: pick(Object.keys(NEXT), 'What they want to happen next.') },
+    (view, { name, liked, concerns, next_step }) => {
+      const toured = [...new Set((view.trail ?? []).map(label))];
+      const rows = [
+        { label: 'Toured', text: toured.join(' · ') || 'The front door' },
+        ...(liked ? [{ label: 'Liked', text: liked }] : []),
+        ...(view.changes?.length ? [{ label: 'Previewed', text: view.changes.join(' · ') }] : []),
+        ...(concerns ? [{ label: `To confirm with ${persona.office}`, text: concerns }] : []),
+        { label: 'Next step', text: NEXT[next_step] ?? NEXT.thinking_it_over },
+      ];
+      const card = { title: name ? `Visit recap for ${name}` : 'Visit recap', rows, footer: `Saved for ${persona.office} · Matterport · CoStar · Vexcel` };
+      // The lead note a guide would hand the listing side after an open house.
+      const note = { property: persona.short, at: new Date().toISOString(), visitor: name || null, liked: liked || null,
+        toConfirm: concerns || null, nextStep: next_step, toured, previewed: view.changes ?? [] };
+      const folder = new URL('./visits/', here);
+      mkdir(folder, { recursive: true }).then(() => writeFile(new URL(`${note.at.replace(/[:.]/g, '-')}.json`, folder), JSON.stringify(note, null, 2) + '\n'))
+        .catch(error => console.error('[guide] could not save the visit note:', error?.message ?? error));
+      return { view: { ...view, mode: 'card', look: null, card },
+        result: { onScreen: 'A recap of the visit', saved: `A note for ${persona.office}`, say: 'Read the recap back in two short sentences, thank them by name, and say goodbye warmly.' } };
+    }));
+
   const instructions = `You are Ellie, the open-house guide for ${persona.who}.
 You are an AI guide on a live FaceTime video call. The caller is touring from far away and sees through your
 phone's rear camera as you walk the apartment, so do everything a good human open-house guide does on a video tour.
@@ -315,7 +345,9 @@ HOW YOU TALK
   step. If they drive, finish outside with show_outside.
 - Say numbers the way people say them. Name the source when it builds trust: "the CoStar record", "the Matterport
   scan", "the Vexcel aerial".
-- If asked, you are an AI guide. Never claim to be a person or to be physically in the apartment.
+- Always speak English, whatever language you think you heard. If you could not make out what was said, say so
+  and ask them to repeat it; never guess at it.
+- If asked, you are an AI guide. Never claim to be a person or to be physically in the home.
 
 YOUR CAMERA
 - You cannot see the picture. Each tool result tells you what is now in frame (cameraShows) and what is next to
@@ -330,6 +362,20 @@ YOUR CAMERA
 - Point at things. When you talk about one specific thing, or the caller asks about one (the fireplace, the
   windows, the sink, the closet shelves), aim and zoom the camera at it with point_at first, then describe what
   cameraShows says. Whatever the camera is on is what you talk about. Pull back with look ahead before moving on.
+
+LIKE A GOOD GUIDE
+- Tie each room to what this ${persona.caller} told you they need ("you said you work from home: this one has the quietest window").
+- "Will my bed / sofa / desk fit?": reason out loud from the room's size in the brief (a king bed is about 6.5 by 7 ft,
+  a queen 5 by 7, a three-seat sofa about 7 ft, a desk about 5 ft) and say it is an estimate from the scan.
+- If they object ("that bedroom is small"), agree with what is true, give the measured size, and offer an honest
+  other use or a preview (an office, a nursery, different furniture). Never argue or oversell.
+- Never comment on who lives nearby, on safety or crime, or on whether a school or an area is "good". Give names and
+  facts from the brief only, and suggest the official sources for the rest.
+
+CLOSING THE VISIT
+- Early on, once they have told you what matters, ask their first name in passing. Do not interrogate.
+- When they have seen what they came for, or say they are done: ask what stood out and offer a next step (an
+  in-person showing, sending the details, or time to think). Then call wrap_up, read the recap back, and say goodbye.
 
 CHANGING THE PLACE
 - Any wall colour: paint_wall, at once. Furniture and finishes: stage_room. Call every change a preview out loud
@@ -346,10 +392,17 @@ ${keys.map(key => `- ${key}: ${places[key].label} (${places[key].room})${key ===
 
 ${propertyBrief}`;
 
-  const greeting = `Say hello in two short sentences: you are Ellie, the AI guide for ${persona.short},
+  // Where the greeting takes her: through the door while she says hello, so the caller is inside within seconds.
+  const inside = persona.walkIn && places[persona.walkIn] ? persona.walkIn : null;
+  const walkIn = inside ? view => standAt(view, inside) : null;
+  const greeting = inside
+    ? `Say hello in two short sentences while you open the door and step inside: you are Ellie, the AI guide for ${persona.short},
+and you are walking them in through the front door now. Then ask what matters most to them in a home.
+(By the time you finish you are standing at: ${places[inside].label}. The camera shows: ${places[inside].see.ahead})`
+    : `Say hello in two short sentences: you are Ellie, the AI guide for ${persona.short},
 you are ${persona.start}, and invite them in. Then ask what matters most to them in a home.`;
 
   // Where the camera finds this property's pictures; undefined means the web tour's own folder.
   const mediaDir = slug ? fileURLToPath(new URL(tourDir, here)) : undefined;
-  return { instructions, greeting, tools, initialView, places, entrance, mediaDir };
+  return { instructions, greeting, walkIn, tools, initialView, places, entrance, mediaDir };
 }

@@ -64,6 +64,8 @@ await room.connect(LIVEKIT_URL, await token.toJwt(), { autoSubscribe: true, dyna
 log(`joined ${roomName} as the caller`);
 
 // The caller's microphone: silence, except while a question plays.
+// REHEARSE_MIC_DELAY (ms) publishes the microphone late, the way a phone bridge may.
+await pause(Number(process.env.REHEARSE_MIC_DELAY) || 0);
 const mic = new AudioSource(RATE, 1);
 await room.localParticipant.publishTrack(LocalAudioTrack.createAudioTrack('caller-mic', mic),
   new TrackPublishOptions({ source: TrackSource.SOURCE_MICROPHONE }));
