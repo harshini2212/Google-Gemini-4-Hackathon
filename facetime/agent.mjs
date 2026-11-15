@@ -1,15 +1,32 @@
 // The open-house guide on a FaceTime video call. The caller hears Ellie and sees the apartment through her camera:
 // her tools (guide.mjs) move that camera and change the rooms on the caller's phone.
 import { fileURLToPath } from 'node:url';
-import { AutoSubscribe, defineAgent, llm, voice } from '@livekit/agents';
+import { AutoSubscribe, defineAgent, llm, tts, voice } from '@livekit/agents';
 import * as elevenlabs from '@livekit/agents-plugin-elevenlabs';
-import { realtime } from '@livekit/agents-plugin-openai';
+import { realtime, TTS as OpenAISpeech } from '@livekit/agents-plugin-openai';
 import { AudioStream, LocalVideoTrack, RoomEvent, TrackKind, TrackSource, VideoBufferType, VideoFrame, VideoSource } from '@livekit/rtc-node';
 import { runAgent } from './chert-rooms.mjs';
 import { greetOnBridgeReady } from './greet.mjs';
 import { loadGuide } from './guide.mjs';
 import { RoomMicrophone } from './room-mic.mjs';
 import { createScreen, HEIGHT, WIDTH } from './screen.mjs';
+
+const ELEVEN_MODEL = process.env.ELEVEN_MODEL || 'eleven_flash_v2_5';
+
+/**
+ * Whether ElevenLabs will speak right now, found out with a two-letter request: a dead key, an empty quota or an
+ * outage then shows before the call starts instead of as silence during it. Resolves to '' when it will, else why not.
+ */
+async function elevenTrouble() {
+  const { ELEVEN_API_KEY: key, ELEVEN_VOICE_ID: voiceId } = process.env;
+  if (!key || !voiceId) return 'ELEVEN_API_KEY or ELEVEN_VOICE_ID is not set';
+  try {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_22050_32`, { method: 'POST',
+      headers: { 'xi-api-key': key, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Hi', model_id: ELEVEN_MODEL }), signal: AbortSignal.timeout(4000) });
+    await response.body?.cancel();
+    return response.ok ? '' : `ElevenLabs answered ${response.status}`;
+  } catch (error) { return `ElevenLabs could not be reached (${error?.name ?? 'error'})`; }
+}
 
 const agent = defineAgent({
   entry: async ctx => {
@@ -53,10 +70,13 @@ const agent = defineAgent({
         .catch(error => console.error('[open-house] could not publish the tour video', error));
     });
 
-    // Her voice: OpenAI's own, or an ElevenLabs voice when ELEVEN_API_KEY and ELEVEN_VOICE_ID are set. With
-    // ElevenLabs the realtime model listens and thinks, and writes what she says for that voice to speak.
+    // Her voice is ElevenLabs, always: the realtime model listens and thinks, and writes what she says for that voice
+    // to speak. OpenAI is the backup twice over. If ElevenLabs is not answering when the call starts, the realtime
+    // model speaks with its own voice for that call; if it fails in the middle of one, OpenAI's speech takes over.
     const model = process.env.OPEN_HOUSE_REALTIME_MODEL || 'gpt-realtime';
-    const borrowed = process.env.ELEVEN_API_KEY && process.env.ELEVEN_VOICE_ID;
+    const trouble = await elevenTrouble(), borrowed = !trouble;
+    console.log(borrowed ? `[open-house] voice: ElevenLabs ${ELEVEN_MODEL}, OpenAI speech standing by`
+      : `[open-house] voice: OpenAI Realtime (backup), because ${trouble}`);
     // When she takes her turn: on what was said sounding finished, not on the first pause, so she does not finish the
     // caller's sentences. OPEN_HOUSE_PATIENCE is low (waits longest), medium or high. Speaking over her still stops her.
     const turnDetection = { type: 'semantic_vad', eagerness: process.env.OPEN_HOUSE_PATIENCE || 'low', create_response: true, interrupt_response: true };
@@ -64,7 +84,9 @@ const agent = defineAgent({
     const ears = { turnDetection, ...(process.env.OPEN_HOUSE_ROOM_MIC ? { inputAudioNoiseReduction: { type: 'far_field' } } : {}) };
     const session = new voice.AgentSession(borrowed
       ? { llm: new realtime.RealtimeModel({ model, modalities: ['text'], ...ears }),
-        tts: new elevenlabs.TTS({ voiceId: process.env.ELEVEN_VOICE_ID, model: process.env.ELEVEN_MODEL || 'eleven_flash_v2_5' }) }
+        tts: new tts.FallbackAdapter({ maxRetryPerTTS: 1, ttsInstances: [
+          new elevenlabs.TTS({ voiceId: process.env.ELEVEN_VOICE_ID, model: ELEVEN_MODEL }),
+          new OpenAISpeech({ model: 'gpt-4o-mini-tts', voice: 'coral' })] }) }
       : { llm: new realtime.RealtimeModel({ model, voice: 'marin', ...ears }) });
     // OPEN_HOUSE_ROOM_MIC: hear the caller through this computer's microphone instead of the phone line (room-mic.mjs).
     let speaking = false, roomMic = null;
