@@ -5,7 +5,8 @@ Each wall is outlined by hand on a flat, straight-on picture of it (a "view": th
 straight lines. The outline minus its holes (windows, trim, outlets, the fireplace) is blurred a little and then
 wrapped into the panorama, the same way scripts/prepare_demo.py wraps the Matterport cube faces.
 
-    python3 facetime/scripts/make_walls.py              # writes facetime/media/walls/<stop>.png and index.json
+    python3 facetime/scripts/make_walls.py               # the A5: facetime/media/walls/<stop>.png and index.json
+    python3 facetime/scripts/make_walls.py alex-springs  # the house: facetime/media/alex-springs/walls/
     python3 facetime/scripts/make_walls.py --preview DIR # also writes DIR/<stop>-<n>.jpg: each view with its outline
 """
 
@@ -110,6 +111,20 @@ WALLS = {
 }
 
 
+# 9530 Alex Springs Lane. Its walls and trim are both white, so every edge here is traced, none found by colour.
+# "aim" is where the camera turns to show the wall: yaw in degrees from the stop's own yaw, then pitch.
+ALEX_SPRINGS = {
+}
+
+PROPERTIES = {
+    "a5": {"model": MODEL_ID, "tour": "data/demo/tour.json", "output": "facetime/media/walls",
+           "walls": WALLS, "unlisted": UNLISTED},
+    "alex-springs": {"model": "ft9fdh4k36m", "tour": "facetime/media/alex-springs/tour.json",
+                     "panoramas": "facetime/media/alex-springs", "output": "facetime/media/alex-springs/walls",
+                     "walls": ALEX_SPRINGS},
+}
+
+
 def panorama_rays(width=WIDTH, height=HEIGHT):
     yaw = (np.arange(width, dtype=np.float32) + 0.5) / width * 2 * np.pi - np.pi
     pitch = np.pi / 2 - (np.arange(height, dtype=np.float32) + 0.5) / height * np.pi
@@ -177,28 +192,38 @@ def view_photo(faces, sweep, view):
     return Image.fromarray(result)
 
 
-def make(cache, output, preview):
+def make(name, cache, output, preview):
+    place = PROPERTIES[name]
+    output = output or ROOT / place["output"]
     output.mkdir(parents=True, exist_ok=True)
-    rays = panorama_rays()
-    tour = json.loads((ROOT / "data/demo/tour.json").read_text())
+    tour = json.loads((ROOT / place["tour"]).read_text())
+    rays = {}
 
-    def save(file, views):
-        mask = np.zeros((HEIGHT, WIDTH), dtype=np.float32)
+    def save(file, views, size=(WIDTH, HEIGHT)):
+        if size not in rays:
+            rays[size] = panorama_rays(*size)
+        mask = np.zeros(size[::-1], dtype=np.float32)
         for view in views:
-            mask = np.maximum(mask, wrap(view, rays))
+            mask = np.maximum(mask, wrap(view, rays[size]))
         Image.fromarray(mask.round().astype(np.uint8)).save(output / file, optimize=True)
 
-    for file, views in UNLISTED.items():
+    for file, views in place.get("unlisted", {}).items():
         save(file, views)
     index = {}
-    for stop, wall in WALLS.items():
+    for stop, wall in place["walls"].items():
         file = wall.get("file", f"{stop}.png")
         if "views" in wall:
-            save(file, wall["views"])
+            if "panoramas" in place:         # a mask is the size of its own panorama
+                with Image.open(ROOT / place["panoramas"] / f"{stop}.webp") as panorama:
+                    save(file, wall["views"], panorama.size)
+            else:
+                save(file, wall["views"])
         index[stop] = {"file": file, "label": wall["label"]}
+        if "aim" in wall:                    # where the camera turns to show the wall: yaw from the stop's own, pitch as is
+            index[stop]["yaw"], index[stop]["pitch"] = wall["aim"]
         if preview:
             preview.mkdir(parents=True, exist_ok=True)
-            faces = cache / "matterport" / MODEL_ID / "faces"
+            faces = cache / "matterport" / place["model"] / "faces"
             for number, view in enumerate(wall.get("views", [])):
                 photo = view_photo(faces, tour["stops"][stop]["sweep"], view)
                 tint = Image.new("RGB", photo.size, (255, 0, 255))
@@ -210,8 +235,9 @@ def make(cache, output, preview):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("property", nargs="?", default="a5", choices=PROPERTIES, help="which home (default: a5)")
     parser.add_argument("--cache", type=Path, default=Path.home() / "brace/data/cache")
-    parser.add_argument("--output", type=Path, default=ROOT / "facetime/media/walls")
+    parser.add_argument("--output", type=Path, help="folder for the masks (default: the property's walls folder)")
     parser.add_argument("--preview", type=Path, help="folder for pictures of each view with its outline")
     args = parser.parse_args()
-    make(args.cache, args.output, args.preview)
+    make(args.property, args.cache, args.output, args.preview)

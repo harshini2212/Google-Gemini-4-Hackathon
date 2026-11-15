@@ -111,10 +111,12 @@ if (!await waitUntil(() => frames > 0, 25000)) log('NO VIDEO arrived from the ag
 else log('first video frame arrived');
 
 // The recording: the picture as it stood at each fifteenth of a second, encoded as it goes.
+// The first ffmpeg that actually runs here (a Mac can have one built for the other processor ahead of it on the PATH).
+const ffmpeg = [process.env.FFMPEG, '/opt/homebrew/bin/ffmpeg', 'ffmpeg'].find(bin => bin && spawnSync(bin, ['-version']).status === 0);
 let film = null, filmTimer = null;
-if (latest && spawnSync('ffmpeg', ['-version']).status === 0) {
+if (latest && ffmpeg) {
   const first = picture();
-  film = spawn('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${first.width}x${first.height}`, '-r', String(FPS),
+  film = spawn(ffmpeg, ['-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${first.width}x${first.height}`, '-r', String(FPS),
     '-i', '-', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', join(out, 'picture.mp4')], { stdio: ['pipe', 'ignore', 'inherit'] });
   film.stdin.on('error', () => {});
   recordingFrom = Date.now();
@@ -166,7 +168,7 @@ if (film) {
   film.stdin.end();
   await new Promise(resolve => film.on('close', resolve));
   writeFileSync(join(out, 'call.wav'), wave(sound.subarray(0, Math.min(length, sound.length))));
-  const mux = spawnSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', join(out, 'picture.mp4'), '-i', join(out, 'call.wav'),
+  const mux = spawnSync(ffmpeg, ['-loglevel', 'error', '-y', '-i', join(out, 'picture.mp4'), '-i', join(out, 'call.wav'),
     '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-shortest', join(out, 'call.mp4')], { stdio: 'inherit' });
   log(mux.status === 0 ? `saved call.mp4 (${(length / RATE).toFixed(0)} s)` : 'could not join the picture and the sound');
 }

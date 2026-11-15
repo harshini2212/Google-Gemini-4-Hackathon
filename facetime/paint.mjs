@@ -3,14 +3,15 @@
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
 
-const wallsDir = new URL('./media/walls/', import.meta.url);
+const legacyWalls = new URL('./media/walls/', import.meta.url);
 
 /**
- * The paintable wall of each stop, from media/walls/index.json: { [stop]: { file, label } }.
+ * The paintable wall of each stop, from index.json in `folder` (default media/walls): { [stop]: { file, label } }.
  * Returns { [stop]: { label, mask, width, height } } where mask is one byte per panorama pixel (255 = wall).
  * A stop without a mask is absent; with no index at all the result is empty.
  */
-export async function loadWalls() {
+export async function loadWalls(folder) {
+  const wallsDir = folder ? new URL(`${String(folder).replace(/\/?$/, '/')}`, 'file://') : legacyWalls;
   let index;
   try { index = JSON.parse(await readFile(new URL('index.json', wallsDir), 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return {}; throw error; }

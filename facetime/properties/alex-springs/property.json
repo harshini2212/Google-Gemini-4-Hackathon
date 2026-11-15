@@ -1,0 +1,726 @@
+{
+ "slug": "alex-springs",
+ "modelId": "ft9fdh4k36m",
+ "name": "9530 Alex Springs Lane",
+ "address": "9530 Alex Springs Ln, Houston, TX 77044",
+ "entrance": "front_porch",
+ "sweeps": [
+  {
+   "id": "i0y5ikn3f69tbnkc4kb4ihhda",
+   "x": -15.529348373413086,
+   "y": -2.417701482772827,
+   "z": 0.9546226263046265,
+   "neighbors": [
+    "scw2sg8p96b67i77edepgwwtd",
+    "nbaepac7nz3ne28dwak5e3d0a"
+   ]
+  },
+  {
+   "id": "scw2sg8p96b67i77edepgwwtd",
+   "x": -15.674015998840332,
+   "y": -5.1078314781188965,
+   "z": 0.9340631365776062,
+   "neighbors": [
+    "i0y5ikn3f69tbnkc4kb4ihhda"
+   ]
+  },
+  {
+   "id": "nbaepac7nz3ne28dwak5e3d0a",
+   "x": -10.527284622192383,
+   "y": -1.3806915283203125,
+   "z": 1.1259701251983643,
+   "neighbors": [
+    "srprciudw9e1eifepkcs54qed",
+    "9fk7m8m55dnpcnt8gbknbeh5a",
+    "i0y5ikn3f69tbnkc4kb4ihhda"
+   ]
+  },
+  {
+   "id": "srprciudw9e1eifepkcs54qed",
+   "x": -7.575153350830078,
+   "y": -1.3991808891296387,
+   "z": 1.253833293914795,
+   "neighbors": [
+    "9fk7m8m55dnpcnt8gbknbeh5a",
+    "nbaepac7nz3ne28dwak5e3d0a"
+   ]
+  },
+  {
+   "id": "9fk7m8m55dnpcnt8gbknbeh5a",
+   "x": -6.342865943908691,
+   "y": -1.395520567893982,
+   "z": 1.272255778312683,
+   "neighbors": [
+    "srprciudw9e1eifepkcs54qed",
+    "nbaepac7nz3ne28dwak5e3d0a",
+    "tgdinzghs9g7ch6u6df21t05d"
+   ]
+  },
+  {
+   "id": "c7mz2tchxpsqmdn548i1g8cwd",
+   "x": -5.0903639793396,
+   "y": -1.4015902280807495,
+   "z": 1.3913015127182007,
+   "neighbors": [
+    "bseag8m0rk9px1ikkt8dar7ca"
+   ]
+  },
+  {
+   "id": "bseag8m0rk9px1ikkt8dar7ca",
+   "x": -1.9366906881332397,
+   "y": -1.7943155765533447,
+   "z": 1.3991237878799438,
+   "neighbors": [
+    "tgdinzghs9g7ch6u6df21t05d",
+    "c7mz2tchxpsqmdn548i1g8cwd",
+    "sqzfqcsaqb4n8pid23mk7e1ka",
+    "2tdmhbteycnetqmqqaaydmnna"
+   ]
+  },
+  {
+   "id": "tgdinzghs9g7ch6u6df21t05d",
+   "x": -0.005731896497309208,
+   "y": -3.6986544132232666,
+   "z": 1.3983205556869507,
+   "neighbors": [
+    "sqzfqcsaqb4n8pid23mk7e1ka",
+    "2z1e403urxidbra8u1m1eim6a",
+    "bseag8m0rk9px1ikkt8dar7ca",
+    "2tdmhbteycnetqmqqaaydmnna",
+    "5w52hrar3x93bhcztgy93umpd",
+    "3wyg886enf9s94m60rtqxei5b",
+    "i5txbbyt6rerzkkgrer76zx0d",
+    "6n1xpsz5yb3idmm9g2ecer30c",
+    "9fk7m8m55dnpcnt8gbknbeh5a"
+   ]
+  },
+  {
+   "id": "2tdmhbteycnetqmqqaaydmnna",
+   "x": -2.0283212661743164,
+   "y": -6.237681865692139,
+   "z": 1.4109902381896973,
+   "neighbors": [
+    "5w52hrar3x93bhcztgy93umpd",
+    "sqzfqcsaqb4n8pid23mk7e1ka",
+    "i5txbbyt6rerzkkgrer76zx0d",
+    "tgdinzghs9g7ch6u6df21t05d",
+    "bseag8m0rk9px1ikkt8dar7ca"
+   ]
+  },
+  {
+   "id": "sqzfqcsaqb4n8pid23mk7e1ka",
+   "x": -0.40036314725875854,
+   "y": -5.509742259979248,
+   "z": 1.4025198221206665,
+   "neighbors": [
+    "5w52hrar3x93bhcztgy93umpd",
+    "2tdmhbteycnetqmqqaaydmnna",
+    "tgdinzghs9g7ch6u6df21t05d",
+    "i5txbbyt6rerzkkgrer76zx0d",
+    "bseag8m0rk9px1ikkt8dar7ca"
+   ]
+  },
+  {
+   "id": "5w52hrar3x93bhcztgy93umpd",
+   "x": -0.45229771733283997,
+   "y": -6.943664073944092,
+   "z": 1.398330569267273,
+   "neighbors": [
+    "sqzfqcsaqb4n8pid23mk7e1ka",
+    "2tdmhbteycnetqmqqaaydmnna",
+    "tgdinzghs9g7ch6u6df21t05d"
+   ]
+  },
+  {
+   "id": "i5txbbyt6rerzkkgrer76zx0d",
+   "x": -2.0073025226593018,
+   "y": -8.397839546203613,
+   "z": 1.2421945333480835,
+   "neighbors": [
+    "2tdmhbteycnetqmqqaaydmnna",
+    "sqzfqcsaqb4n8pid23mk7e1ka",
+    "tgdinzghs9g7ch6u6df21t05d"
+   ]
+  },
+  {
+   "id": "2z1e403urxidbra8u1m1eim6a",
+   "x": 2.3922715187072754,
+   "y": -3.087873697280884,
+   "z": 1.3775413036346436,
+   "neighbors": [
+    "ibhpa6z16518ysegu3as8dyab",
+    "3wyg886enf9s94m60rtqxei5b",
+    "tgdinzghs9g7ch6u6df21t05d",
+    "6n1xpsz5yb3idmm9g2ecer30c"
+   ]
+  },
+  {
+   "id": "3wyg886enf9s94m60rtqxei5b",
+   "x": 3.7938084602355957,
+   "y": -3.3222475051879883,
+   "z": 1.386228084564209,
+   "neighbors": [
+    "6n1xpsz5yb3idmm9g2ecer30c",
+    "2z1e403urxidbra8u1m1eim6a",
+    "pg8wzs3x6ptwbfrdp4rh8sibc",
+    "tgdinzghs9g7ch6u6df21t05d",
+    "86uhw79t1p6p6afqufwt6mf1c"
+   ]
+  },
+  {
+   "id": "6n1xpsz5yb3idmm9g2ecer30c",
+   "x": 5.133494853973389,
+   "y": -3.6964263916015625,
+   "z": 1.3861440420150757,
+   "neighbors": [
+    "3wyg886enf9s94m60rtqxei5b",
+    "ix5qkp59uyusu9s3h0n3e7nta",
+    "ee2swxuexcrkshsde0cbp7atc",
+    "2z1e403urxidbra8u1m1eim6a",
+    "86uhw79t1p6p6afqufwt6mf1c",
+    "tgdinzghs9g7ch6u6df21t05d"
+   ]
+  },
+  {
+   "id": "ibhpa6z16518ysegu3as8dyab",
+   "x": 2.3747031688690186,
+   "y": -2.015109062194824,
+   "z": 1.3921587467193604,
+   "neighbors": [
+    "2z1e403urxidbra8u1m1eim6a"
+   ]
+  },
+  {
+   "id": "ix5qkp59uyusu9s3h0n3e7nta",
+   "x": 5.302887916564941,
+   "y": -1.9752147197723389,
+   "z": 1.377233862876892,
+   "neighbors": [
+    "6n1xpsz5yb3idmm9g2ecer30c",
+    "ee2swxuexcrkshsde0cbp7atc"
+   ]
+  },
+  {
+   "id": "pg8wzs3x6ptwbfrdp4rh8sibc",
+   "x": 4.0299859046936035,
+   "y": -5.095663547515869,
+   "z": 1.4001035690307617,
+   "neighbors": [
+    "3wyg886enf9s94m60rtqxei5b"
+   ]
+  },
+  {
+   "id": "ee2swxuexcrkshsde0cbp7atc",
+   "x": 5.06358528137207,
+   "y": -5.796302795410156,
+   "z": 1.3901374340057373,
+   "neighbors": [
+    "6n1xpsz5yb3idmm9g2ecer30c",
+    "ix5qkp59uyusu9s3h0n3e7nta"
+   ]
+  },
+  {
+   "id": "86uhw79t1p6p6afqufwt6mf1c",
+   "x": 8.414497375488281,
+   "y": -3.689161777496338,
+   "z": 1.372473120689392,
+   "neighbors": [
+    "s5i90xy6yykngwta3ci2iayyb",
+    "wfzuxm693i48fr3d886et328b",
+    "6n1xpsz5yb3idmm9g2ecer30c",
+    "b64zh5e4hi7cfhie6kb1rha2a",
+    "c0n3xpqr9qubqasbtn1f555kc",
+    "3wyg886enf9s94m60rtqxei5b"
+   ]
+  },
+  {
+   "id": "b64zh5e4hi7cfhie6kb1rha2a",
+   "x": 8.126444816589355,
+   "y": -7.225864410400391,
+   "z": 1.3717024326324463,
+   "neighbors": [
+    "86uhw79t1p6p6afqufwt6mf1c"
+   ]
+  },
+  {
+   "id": "s5i90xy6yykngwta3ci2iayyb",
+   "x": 8.477189064025879,
+   "y": -1.7957921028137207,
+   "z": 1.3746341466903687,
+   "neighbors": [
+    "wfzuxm693i48fr3d886et328b",
+    "86uhw79t1p6p6afqufwt6mf1c",
+    "c0n3xpqr9qubqasbtn1f555kc"
+   ]
+  },
+  {
+   "id": "wfzuxm693i48fr3d886et328b",
+   "x": 8.54013442993164,
+   "y": -1.0122878551483154,
+   "z": 1.3698251247406006,
+   "neighbors": [
+    "s5i90xy6yykngwta3ci2iayyb",
+    "c0n3xpqr9qubqasbtn1f555kc",
+    "86uhw79t1p6p6afqufwt6mf1c"
+   ]
+  },
+  {
+   "id": "c0n3xpqr9qubqasbtn1f555kc",
+   "x": 8.757603645324707,
+   "y": 0.19858840107917786,
+   "z": 1.3431577682495117,
+   "neighbors": [
+    "wfzuxm693i48fr3d886et328b",
+    "s5i90xy6yykngwta3ci2iayyb",
+    "86uhw79t1p6p6afqufwt6mf1c"
+   ]
+  }
+ ],
+ "rooms": [
+  {
+   "id": "cdz3fkt38kae7tapstpt0eaeb",
+   "type": "Great room",
+   "area_sqft": 542.5,
+   "polygon": [
+    [
+     -5.855,
+     0.789
+    ],
+    [
+     0.7,
+     0.786
+    ],
+    [
+     0.699,
+     -2.35
+    ],
+    [
+     0.698,
+     -3.063
+    ],
+    [
+     0.698,
+     -4.315
+    ],
+    [
+     0.697,
+     -5.053
+    ],
+    [
+     1.506,
+     -5.053
+    ],
+    [
+     1.504,
+     -7.996
+    ],
+    [
+     -4.603,
+     -7.993
+    ],
+    [
+     -4.601,
+     -4.343
+    ],
+    [
+     -4.6,
+     -2.186
+    ],
+    [
+     -5.857,
+     -2.185
+    ],
+    [
+     -5.855,
+     0.789
+    ]
+   ]
+  },
+  {
+   "id": "xy2x8mpaaqknp7q2c3nnbw1ma",
+   "type": "Garage",
+   "area_sqft": 367.4,
+   "polygon": [
+    [
+     -10.751,
+     -7.99
+    ],
+    [
+     -10.748,
+     -2.183
+    ],
+    [
+     -5.857,
+     -2.185
+    ],
+    [
+     -4.6,
+     -2.186
+    ],
+    [
+     -4.601,
+     -4.343
+    ],
+    [
+     -4.603,
+     -7.993
+    ],
+    [
+     -10.751,
+     -7.99
+    ]
+   ]
+  },
+  {
+   "id": "tt6gm2a0463x9wmnx7rn6gugc",
+   "type": "Primary bedroom",
+   "area_sqft": 201.8,
+   "polygon": [
+    [
+     6.193,
+     -5.398
+    ],
+    [
+     6.194,
+     -4.697
+    ],
+    [
+     5.83,
+     -4.317
+    ],
+    [
+     5.83,
+     -3.066
+    ],
+    [
+     6.989,
+     -3.066
+    ],
+    [
+     10.155,
+     -3.068
+    ],
+    [
+     10.152,
+     -8.0
+    ],
+    [
+     6.192,
+     -7.998
+    ],
+    [
+     6.193,
+     -5.398
+    ]
+   ]
+  },
+  {
+   "id": "h26t7ky77ew74yb0pg8qqf5rd",
+   "type": "Primary bath",
+   "area_sqft": 80.1,
+   "polygon": [
+    [
+     6.99,
+     -1.376
+    ],
+    [
+     6.99,
+     -0.397
+    ],
+    [
+     10.156,
+     -0.399
+    ],
+    [
+     10.155,
+     -3.068
+    ],
+    [
+     6.989,
+     -3.066
+    ],
+    [
+     6.989,
+     -2.396
+    ],
+    [
+     6.99,
+     -1.376
+    ]
+   ]
+  },
+  {
+   "id": "3m54yff1z7crxaywd8if9rb0d",
+   "type": "Bedroom 2",
+   "area_sqft": 101.3,
+   "polygon": [
+    [
+     1.851,
+     -3.064
+    ],
+    [
+     1.851,
+     -2.35
+    ],
+    [
+     0.699,
+     -2.35
+    ],
+    [
+     0.7,
+     0.786
+    ],
+    [
+     3.848,
+     0.784
+    ],
+    [
+     3.847,
+     -2.082
+    ],
+    [
+     2.89,
+     -2.081
+    ],
+    [
+     2.889,
+     -3.064
+    ],
+    [
+     1.851,
+     -3.064
+    ]
+   ]
+  },
+  {
+   "id": "2qdmc5i9byxi79ry1pxdkqzea",
+   "type": "Bedroom 3",
+   "area_sqft": 102.2,
+   "polygon": [
+    [
+     6.991,
+     0.783
+    ],
+    [
+     6.99,
+     -0.397
+    ],
+    [
+     6.99,
+     -1.376
+    ],
+    [
+     6.989,
+     -2.396
+    ],
+    [
+     5.831,
+     -2.395
+    ],
+    [
+     5.83,
+     -3.066
+    ],
+    [
+     4.745,
+     -3.065
+    ],
+    [
+     4.746,
+     -2.082
+    ],
+    [
+     3.847,
+     -2.082
+    ],
+    [
+     3.848,
+     0.784
+    ],
+    [
+     6.991,
+     0.783
+    ]
+   ]
+  },
+  {
+   "id": "a5f9age4zzxewres6iqux2emc",
+   "type": "Bedroom 4",
+   "area_sqft": 95.9,
+   "polygon": [
+    [
+     3.502,
+     -5.054
+    ],
+    [
+     3.502,
+     -4.316
+    ],
+    [
+     4.563,
+     -4.317
+    ],
+    [
+     4.561,
+     -7.998
+    ],
+    [
+     1.504,
+     -7.996
+    ],
+    [
+     1.506,
+     -5.053
+    ],
+    [
+     3.502,
+     -5.054
+    ]
+   ]
+  },
+  {
+   "id": "19ab05tns5h6y4qm42esqqpea",
+   "type": "Hallway",
+   "area_sqft": 59.8,
+   "polygon": [
+    [
+     5.83,
+     -3.066
+    ],
+    [
+     5.83,
+     -4.317
+    ],
+    [
+     5.548,
+     -4.317
+    ],
+    [
+     4.563,
+     -4.317
+    ],
+    [
+     3.502,
+     -4.316
+    ],
+    [
+     0.698,
+     -4.315
+    ],
+    [
+     0.698,
+     -3.063
+    ],
+    [
+     1.851,
+     -3.064
+    ],
+    [
+     2.889,
+     -3.064
+    ],
+    [
+     4.745,
+     -3.065
+    ],
+    [
+     5.83,
+     -3.066
+    ]
+   ]
+  },
+  {
+   "id": "m8npxsuk79xy21dd09x9wtped",
+   "type": "Hall bath",
+   "area_sqft": 48.8,
+   "polygon": [
+    [
+     5.547,
+     -5.397
+    ],
+    [
+     6.193,
+     -5.398
+    ],
+    [
+     6.192,
+     -7.998
+    ],
+    [
+     4.561,
+     -7.998
+    ],
+    [
+     4.563,
+     -4.317
+    ],
+    [
+     5.548,
+     -4.317
+    ],
+    [
+     5.547,
+     -5.397
+    ]
+   ]
+  },
+  {
+   "id": "b4qtykzcazp4iumkamm7y7h2b",
+   "type": "Primary closet",
+   "area_sqft": 33.1,
+   "polygon": [
+    [
+     6.99,
+     -0.397
+    ],
+    [
+     6.991,
+     0.783
+    ],
+    [
+     10.156,
+     0.781
+    ],
+    [
+     10.156,
+     -0.399
+    ],
+    [
+     6.99,
+     -0.397
+    ]
+   ]
+  },
+  {
+   "id": "ediidma5zg15dufx3n0qyq21a",
+   "type": "Laundry closet",
+   "area_sqft": 14.8,
+   "polygon": [
+    [
+     3.847,
+     -2.082
+    ],
+    [
+     4.746,
+     -2.082
+    ],
+    [
+     4.745,
+     -3.065
+    ],
+    [
+     2.889,
+     -3.064
+    ],
+    [
+     2.89,
+     -2.081
+    ],
+    [
+     3.847,
+     -2.082
+    ]
+   ]
+  }
+ ]
+}

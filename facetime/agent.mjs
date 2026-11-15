@@ -14,7 +14,8 @@ const agent = defineAgent({
     await ctx.connect(undefined, AutoSubscribe.AUDIO_ONLY);
     // Chert prepares a room before a caller exists. Load the guide and the pictures while waiting,
     // but open the paid model session and send video only once the caller is here.
-    const [guide, screen, caller] = await Promise.all([loadGuide(), createScreen(), ctx.waitForParticipant()]);
+    const guide = await loadGuide();
+    const [screen, caller] = await Promise.all([createScreen(guide.mediaDir ? { mediaDir: guide.mediaDir } : {}), ctx.waitForParticipant()]);
 
     let view = guide.initialView();
     screen.show(view);

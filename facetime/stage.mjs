@@ -4,10 +4,11 @@
 // brace/backend/openproblems/reimagine_view.py, in the panorama's own yaw/pitch (see scripts/prepare_demo.py).
 import { createHash } from 'node:crypto';
 import { appendFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 
-const stagedDir = new URL('./media/staged/', import.meta.url);
+const stagedDir = fileURLToPath(new URL('./media/staged/', import.meta.url));   // the first property's results; others pass their own folder
 
 const ENDPOINT = 'https://api.openai.com/v1/images/edits';
 const MODEL = process.env.STAGE_MODEL || 'gpt-image-2';
@@ -75,11 +76,11 @@ export function cutView(pano, yawDeg, pitchDeg, width, height, focal) {
 }
 
 /** What the call shows: 60 degrees tall, like the tour's own camera. Writes a JPEG; for checking results by eye. */
-export async function renderView(panoFile, yawDeg, pitchDeg, outFile, width = 1280, height = 720, vfov = 60) {
+export async function renderView(panoFile, yawDeg, pitchDeg, outFile, width = 1280, height = 720, vfov = 60, quality = 88) {
   const pano = await readPano(panoFile);
   const focal = (height / 2) / Math.tan(vfov * Math.PI / 360);
   await sharp(Buffer.from(cutView(pano, yawDeg, pitchDeg, width, height, focal)), { raw: { width, height, channels: 3 } })
-    .jpeg({ quality: 88 }).toFile(outFile);
+    .jpeg({ quality }).toFile(outFile);
   return outFile;
 }
 
@@ -293,13 +294,13 @@ export function compose(pano, real, redrawn, yawDeg, pitchDeg) {
 
 // ---- the image service ------------------------------------------------------------------------------------------
 
-/** One paid call: the photo (JPEG bytes) and the instruction in, the edited photo's bytes out. */
-async function editPhoto(jpeg, prompt, timeoutMs) {
+/** One paid call: the photo to edit (JPEG bytes, then any reference photos) and the instruction in, the edited photo's bytes out. */
+async function editPhoto(jpegs, prompt, timeoutMs) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('Staging needs OPENAI_API_KEY in the environment');
   const body = {
     model: MODEL, prompt, n: 1, size: `${VIEW.width}x${VIEW.height}`, quality: QUALITY, output_format: 'jpeg', output_compression: 92,
-    images: [{ image_url: `data:image/jpeg;base64,${jpeg.toString('base64')}` }],
+    images: jpegs.map((jpeg) => ({ image_url: `data:image/jpeg;base64,${jpeg.toString('base64')}` })),
   };
   let response;
   try {
@@ -331,6 +332,10 @@ async function editPhoto(jpeg, prompt, timeoutMs) {
 
 const underway = new Map();                             // cache file -> promise, so a repeated request waits for the first
 
+const LIKE = ' The second image shows this same room from another spot, already furnished. Use the same furniture as in '
+  + 'the second image, with the same shapes, colours and materials, placed where those same pieces would really be seen '
+  + 'from this camera. Take only the furniture from the second image, never its walls, windows, floor or viewpoint.';
+
 /**
  * Edits what the camera faces at one standpoint and lays the result back onto the panorama.
  * @param {object} o
@@ -339,50 +344,57 @@ const underway = new Map();                             // cache file -> promise
  * @param {number} o.pitch    degrees
  * @param {string} o.request  what the caller asked for, in plain words
  * @param {string} o.name     short slug for the cache file
+ * @param {string} [o.outDir] folder the result is written to and looked up in (default media/staged)
+ * @param {{ file: string, yaw: number, pitch: number }} [o.like]  a staged panorama of the same room from another spot, and where to look in it: its furniture is the model for this one
  * @param {number} [o.timeoutMs]  how long to wait for the image service (default 90 s)
  * @returns {Promise<{ file: string, cached: boolean, seconds: number }>}  file = absolute path of the staged equirect panorama (webp, same size as source)
  */
-export async function stagePano({ source, yaw, pitch, request, name, timeoutMs = TIMEOUT_MS }) {
+export async function stagePano({ source, yaw, pitch, request, name, outDir = stagedDir, like, timeoutMs = TIMEOUT_MS }) {
   const started = performance.now();
   const seconds = () => Math.round((performance.now() - started) / 100) / 10;
   if (!request?.trim()) throw new Error('Staging needs a request');
-  const bytes = await readFile(source);
+  const bytes = await readFile(source), model = like && await readFile(like.file);
   // The edit camera stays near level, so the photo always has floor to stand furniture on.
-  const aim = { yaw: Math.round((((yaw % 360) + 540) % 360 - 180) * 10) / 10, pitch: Math.min(Math.max(Math.round(pitch), -25), 5) };
-  const prompt = stagingPrompt(request);
-  const key = createHash('sha256').update(JSON.stringify([
-    createHash('sha256').update(bytes).digest('hex'), aim.yaw, aim.pitch, prompt.toLowerCase().replace(/\s+/g, ' '), MODEL, QUALITY, VIEW,
-  ])).digest('hex').slice(0, 10);
+  const level = (y, p) => ({ yaw: Math.round((((y % 360) + 540) % 360 - 180) * 10) / 10, pitch: Math.min(Math.max(Math.round(p), -25), 5) });
+  const aim = level(yaw, pitch), from = like && level(like.yaw, like.pitch);
+  const prompt = stagingPrompt(request) + (like ? LIKE : '');
+  const sha = (data) => createHash('sha256').update(data).digest('hex');
+  const key = sha(JSON.stringify([
+    sha(bytes), aim.yaw, aim.pitch, prompt.toLowerCase().replace(/\s+/g, ' '), MODEL, QUALITY, VIEW, ...(like ? [sha(model), from.yaw, from.pitch] : []),
+  ])).slice(0, 10);
   const slug = String(name || 'staged').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'staged';
   // The same request under another name is still the same picture.
-  const made = (await readdir(stagedDir).catch(() => [])).find((entry) => entry.endsWith(`-${key}.webp`));
-  if (made) return { file: fileURLToPath(new URL(made, stagedDir)), cached: true, seconds: seconds() };
-  const file = fileURLToPath(new URL(`${slug}-${key}.webp`, stagedDir));
+  const made = (await readdir(outDir).catch(() => [])).find((entry) => entry.endsWith(`-${key}.webp`));
+  if (made) return { file: path.join(outDir, made), cached: true, seconds: seconds() };
+  const file = path.join(outDir, `${slug}-${key}.webp`);
   if (underway.has(file)) return { ...(await underway.get(file)), seconds: seconds() };
 
   const work = (async () => {
     const pano = await readPano(bytes);
     const { width, height, hfov } = VIEW, focal = (width / 2) / Math.tan(hfov * Math.PI / 360);
+    const jpeg = (rgb) => sharp(Buffer.from(rgb), { raw: { width, height, channels: 3 } }).jpeg({ quality: 90 }).toBuffer();
     const real = cutView(pano, aim.yaw, aim.pitch, width, height, focal);
-    const sent = await sharp(Buffer.from(real), { raw: { width, height, channels: 3 } }).jpeg({ quality: 90 }).toBuffer();
-    // The photo the image model returned is kept, so the lay-back can be redone without paying for it again.
-    const kept = new URL(`photos/${key}.jpg`, stagedDir);
-    let image = await readFile(kept).catch(() => null), usage, service = 0;
+    const sent = [await jpeg(real)];
+    if (like) sent.push(await jpeg(cutView(await readPano(model), from.yaw, from.pitch, width, height, focal)));
+    // With STAGE_PHOTO_DIR set, the photo the image model returned is kept there, so the lay-back can be redone
+    // without paying for it again. Off by default: the photos are only for working on this file.
+    const kept = process.env.STAGE_PHOTO_DIR && path.join(process.env.STAGE_PHOTO_DIR, `${key}.jpg`);
+    let image = kept ? await readFile(kept).catch(() => null) : null, usage, service = 0;
     const paid = !image;
     if (paid) {
       const asked = performance.now();
       ({ image, usage } = await editPhoto(sent, prompt, timeoutMs));
       service = Math.round((performance.now() - asked) / 100) / 10;
-      await mkdir(new URL('photos/', stagedDir), { recursive: true });
-      await writeFile(kept, image);
+      if (kept) await writeFile(kept, image);
     }
     const redrawn = await sharp(image).removeAlpha().toColourspace('srgb').resize(width, height, { fit: 'fill' }).raw().toBuffer();
     const { staged, settled } = compose(pano, real, redrawn, aim.yaw, aim.pitch);
+    await mkdir(outDir, { recursive: true });
     const draft = `${file}.${process.pid}.tmp`;
     await sharp(staged, { raw: { width: pano.width, height: pano.height, channels: 3 } }).webp({ quality: 88, effort: 2 }).toFile(draft);
     await rename(draft, file);
-    if (paid) await appendFile(new URL('generations.jsonl', stagedDir), `${JSON.stringify({
-      at: new Date().toISOString(), file: `${slug}-${key}.webp`, request, ...aim, model: MODEL, quality: QUALITY,
+    if (paid) await appendFile(path.join(outDir, 'generations.jsonl'), `${JSON.stringify({
+      at: new Date().toISOString(), file: path.basename(file), request, ...aim, model: MODEL, quality: QUALITY,
       serviceSeconds: service, seconds: seconds(), shift: settled.shift, gain: settled.gain, usage,
     })}\n`).catch(() => {});
     return { file, cached: !paid };
@@ -392,14 +404,17 @@ export async function stagePano({ source, yaw, pitch, request, name, timeoutMs =
   finally { underway.delete(file); }
 }
 
-/** Pre-generated results: { [stopKey]: [{ id, label, request, file, yaw, pitch }] } read from media/staged/index.json (empty object when none). */
-export async function loadPresets() {
+/**
+ * Pre-generated results: { [stopKey]: [{ id, label, request, file, yaw, pitch }] } read from index.json in `dir`
+ * (default media/staged; another property passes its own folder). Empty object when there is none.
+ */
+export async function loadPresets(dir = stagedDir) {
   let index;
-  try { index = JSON.parse(await readFile(new URL('index.json', stagedDir), 'utf8')); }
+  try { index = JSON.parse(await readFile(path.join(dir, 'index.json'), 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
   const presets = {};
   for (const [stop, list] of Object.entries(index)) {
-    presets[stop] = list.map((preset) => ({ ...preset, file: fileURLToPath(new URL(preset.file, stagedDir)) }));
+    presets[stop] = list.map((preset) => ({ ...preset, file: path.join(dir, preset.file) }));
   }
   return presets;
 }
