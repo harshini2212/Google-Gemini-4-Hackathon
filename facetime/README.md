@@ -20,6 +20,18 @@ Node 22.23.2 or later (24 is what we use). The tour assets must exist first: `np
 
 Both processes must stay up. After changing the agent, restart both.
 
+## Which home
+
+`OPEN_HOUSE_PROPERTY=alex-springs` (in the environment of `npm start`, `rehearse.mjs` and `preview.mjs`) tours the
+house at 9530 Alex Springs Lane; without it the guide tours the A5 apartment. A property is two folders:
+`properties/<slug>/` (places, knowledge, site notes; in git) and `media/<slug>/` (360 photos, wall masks, furniture
+presets, depth; built locally, not in git). Build the pictures with `python3 scripts/prepare_property.py <slug>`,
+then `make_walls.py`, `make_staging.mjs --property` and `make_depth.py` for that slug.
+
+## See it in a browser
+
+`node --env-file=.env.local preview.mjs`, then http://localhost:5190: the same call in a tab, with your microphone.
+
 ## Rehearse without a phone
 
 ```sh
@@ -34,11 +46,14 @@ use the OpenAI key.
 
 | File | What it does |
 | --- | --- |
-| `agent.mjs` | The call: joins the room, publishes the camera track, runs the Realtime voice with the tour tools |
-| `screen.mjs`, `screen-worker.mjs` | Draws the picture in a worker thread: panorama camera, wall finishes, aerial, floor plan, captions |
-| `paint.mjs` | Tints a wall in a panorama any colour, keeping its light and shadow |
-| `knowledge.mjs` | What the guide knows about the unit, the community and the area, with sources |
-| `rehearse.mjs` | The phone-free rehearsal caller |
+| `agent.mjs` | The call: joins the room, publishes the camera track, runs the Realtime voice with the guide's tools |
+| `guide.mjs` | Ellie: her instructions and tools (walk, look, point and zoom, paint, furnish, outside, floor plan) |
+| `places.mjs`, `knowledge.mjs` | The apartment: where she can stand and what the camera sees there; what she knows, with sources |
+| `properties/<slug>/` | The same for another property, plus `site.json` (aerial, captions, persona) |
+| `screen.mjs`, `screen-worker.mjs` | Draws the picture in a worker thread: a free hand-held camera in the 360 photos, walks, paint, staging, aerial, floor plan |
+| `paint.mjs`, `stage.mjs` | Paint a wall any colour keeping its light; add or change furniture with an image model and lay it back on the photo |
+| `depthwalk.mjs` | Redraws a 360 photo from a camera that has stepped away from it, using depth from the scan's mesh |
+| `rehearse.mjs`, `preview.mjs`, `call.mjs` | A rehearsal caller without a phone; the call in a browser tab; an outbound call through Chert's API |
 | `chert-rooms.mjs`, `greet.mjs` | From the Chert starter: how the agent joins calls and when it greets |
 
 ## Rules Chert enforces
