@@ -1,5 +1,7 @@
 // The open-house guide on a FaceTime video call. The caller hears Ellie and sees the apartment through her camera:
 // her tools (guide.mjs) move that camera and change the rooms on the caller's phone.
+import { spawn } from 'node:child_process';
+import { mkdirSync, openSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { AutoSubscribe, defineAgent, llm, tts, voice } from '@livekit/agents';
 import * as elevenlabs from '@livekit/agents-plugin-elevenlabs';
@@ -26,6 +28,21 @@ async function elevenTrouble() {
     await response.body?.cancel();
     return response.ok ? '' : `ElevenLabs answered ${response.status}`;
   } catch (error) { return `ElevenLabs could not be reached (${error?.name ?? 'error'})`; }
+}
+
+/**
+ * When a real FaceTime call ends, asks the caller by text how the tour went (after-call.mjs), in a process of its own
+ * because this one is closing. `phone` is a number the caller gave the guide, if any; Chert does not say who called.
+ */
+function textAfter(callId, phone) {
+  if (process.env.OPEN_HOUSE_FEEDBACK_TEXT === '0') return;
+  try {
+    const folder = new URL('./visits/', import.meta.url);
+    mkdirSync(folder, { recursive: true });
+    const log = openSync(new URL('after-call.log', folder), 'a');
+    spawn(process.execPath, [fileURLToPath(new URL('./after-call.mjs', import.meta.url)), callId, ...(phone ? [phone] : [])],
+      { detached: true, stdio: ['ignore', log, log] }).unref();
+  } catch (error) { console.error('[open-house] could not start the after-call text', error?.message ?? error); }
 }
 
 const agent = defineAgent({
@@ -96,7 +113,7 @@ const agent = defineAgent({
       roomMic = new RoomMicrophone(process.env.OPEN_HOUSE_ROOM_MIC, () => speaking);
       session.input.audio = roomMic;
     }
-    let open = true;
+    let open = true, greeted = false, textTo = '';
     const call = {
       // For work that finishes after its tool has answered (a staging preview): change the view, then tell her.
       later(change, say) {
@@ -110,6 +127,7 @@ const agent = defineAgent({
       name: spec.name, description: spec.description, parameters: spec.parameters,
       execute: async args => {
         const action = spec.run(view, args, call);
+        if (spec.name === 'wrap_up' && args.phone) textTo = String(args.phone);
         if (action.view !== view) { view = action.view; screen.show(view); }
         console.log(`[open-house] ${spec.name} ${JSON.stringify(args)} -> ${JSON.stringify(action.result).slice(0, 300)}`);
         return JSON.stringify(action.result);
@@ -118,6 +136,10 @@ const agent = defineAgent({
 
     ctx.addShutdownCallback(async () => {
       open = false;
+      // Only a real call that got as far as hello: Chert names its caller chert-bridge-<call id>; rehearsals and the
+      // browser preview carry no call id.
+      const callId = /^chert-bridge-([0-9a-f]{8}-[0-9a-f-]{27})$/.exec(caller.identity)?.[1];
+      if (callId && greeted) textAfter(callId, textTo);
       await roomMic?.close();
       await screen.close();
       await session.close();
@@ -143,6 +165,7 @@ const agent = defineAgent({
     // of that. Participant arrival alone is not readiness, so there is no greeting
     // on it. Without the signal there is no greeting, and the caller speaks first.
     const stopGreeting = greetOnBridgeReady(ctx.room, () => {
+      greeted = true;
       session.generateReply({ instructions: guide.greeting });
       // She walks in through the door while she says hello.
       if (guide.walkIn) setTimeout(() => { if (open) { view = guide.walkIn(view); screen.show(view); } }, 1500);

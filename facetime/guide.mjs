@@ -238,15 +238,25 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
         return { view: { ...view, look: resting ? null : look },
           result: { facing: look.direction, zoomedIn: look.zoom > 1, cameraShows: place.see[look.direction] ?? 'No notes for this direction. Describe only what the property brief says about this room.' } };
       }),
-    tool('point_at', 'Aim the camera at one specific thing at this spot and zoom in on it, so the caller gets a close look while you talk about it (the fireplace, a window, the sink, the closet shelves). The things you can point at here are listed in thingsToPointAt when you arrive. Pull back afterwards with look ahead.',
-      { feature: { type: 'string', description: 'The key of a thing listed in thingsToPointAt at this spot.' } }, (view, { feature }) => {
-        if (view.mode !== 'interior') return { view, result: { error: 'You are showing the outside or the floor plan. Walk to a room first.' } };
-        const features = places[view.at].features ?? {}, wanted = String(feature ?? '').toLowerCase();
-        const key = Object.keys(features).find(k => k === wanted) ?? Object.keys(features).find(k => features[k].label.toLowerCase().includes(wanted) || wanted.includes(k));
-        if (!key) return { view, result: { error: `Nothing by that name to point at here. You can point at: ${Object.keys(features).join(', ') || 'nothing mapped at this spot'}.` } };
-        const item = features[key];
-        return { view: { ...view, look: { direction: `feature:${key}`, yaw: item.yaw, pitch: item.pitch, zoom: item.zoom } },
-          result: { pointingAt: item.label, cameraShows: item.say, note: 'Talk about exactly this now. Pull back with look ahead when you move on.' } };
+    tool('point_at', 'Aim the camera at one specific thing and zoom in on it, so the caller gets a close look while you talk about it (the stove, a window, the sink, the house number, the garage door). The things at this spot are listed in thingsToPointAt when you arrive, and the things at every spot are listed under PLACES. If the thing is at another spot, call this anyway: you walk to the nearest spot that has it and point, in one move. Pull back afterwards with look ahead.',
+      { feature: { type: 'string', description: 'The key of the thing, from thingsToPointAt or from PLACES.' } }, (view, { feature }) => {
+        const wanted = String(feature ?? '').toLowerCase().trim().replace(/[\s-]+/g, '_'), words = wanted.replace(/_/g, ' ');
+        const hit = at => {
+          const features = places[at].features ?? {};
+          return Object.keys(features).find(k => k === wanted)
+            ?? Object.keys(features).find(k => features[k].label.toLowerCase().includes(words) || wanted.includes(k) || (wanted.length > 2 && k.includes(wanted)));
+        };
+        // Here first; otherwise the nearest spot that has it, so she goes straight there instead of looking for it.
+        let at = view.mode === 'interior' && hit(view.at) ? view.at : null;
+        if (!at && wanted) {
+          at = keys.filter(hit).map(key => [key, shortestPath(sweeps, places[view.at].sweep, places[key].sweep)?.length ?? 999])
+            .sort((a, b) => a[1] - b[1])[0]?.[0] ?? null;
+        }
+        if (!at) return { view, result: { error: `Nothing by that name is mapped on this tour. Here you can point at: ${Object.keys(places[view.at].features ?? {}).join(', ') || 'nothing'}. Say what you can show instead; do not walk around looking for it.` } };
+        const key = hit(at), item = places[at].features[key], here = at === view.at && view.mode === 'interior';
+        return { view: { ...(here ? view : standAt(view, at)), look: { direction: `feature:${key}`, yaw: item.yaw, pitch: item.pitch, zoom: item.zoom } },
+          result: { ...(here ? {} : { walkedTo: places[at].label, room: places[at].room }), pointingAt: item.label, cameraShows: item.say,
+            note: 'Talk about exactly this now. Pull back with look ahead when you move on.' } };
       }),
     tool('paint_wall', 'Repaint the wall in this room any colour the caller names, live on camera. You choose the hex code for the colour they said. Use color "original" to put the wall back.',
       { color: { type: 'string', description: 'Hex colour like #b3202a, or "original".' }, name: { type: 'string', description: 'The colour as you would say it, e.g. "Deep red".' } },
@@ -349,8 +359,9 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
     { name: { type: 'string', description: 'The caller\'s first name, or an empty string if they did not give one.' },
       liked: { type: 'string', description: 'What they liked, in a short phrase in your words.' },
       concerns: { type: 'string', description: 'Questions or concerns to follow up on, or an empty string.' },
+      phone: { type: 'string', description: 'The mobile number they gave you for a follow-up text, digits only, or an empty string. Only a number they said aloud; never ask twice and never make one up.' },
       next_step: pick(Object.keys(NEXT), 'What they want to happen next.') },
-    (view, { name, liked, concerns, next_step }) => {
+    (view, { name, liked, concerns, phone, next_step }) => {
       const toured = [...new Set((view.trail ?? []).map(label))];
       const rows = [
         { label: 'Toured', text: toured.join(' · ') || 'The front door' },
@@ -362,7 +373,8 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
       const card = { title: name ? `Visit recap for ${name}` : 'Visit recap', rows, footer: `Saved for ${persona.office} · Matterport · CoStar · Vexcel` };
       // The lead note a guide would hand the listing side after an open house.
       const note = { property: persona.short, at: new Date().toISOString(), visitor: name || null, liked: liked || null,
-        toConfirm: concerns || null, nextStep: next_step, toured, previewed: view.changes ?? [] };
+        toConfirm: concerns || null, nextStep: next_step, toured, previewed: view.changes ?? [],
+        ...(/\d{10}/.test(String(phone ?? '').replace(/\D/g, '')) ? { phone: String(phone).replace(/[^\d+]/g, '') } : {}) };
       const folder = new URL('./visits/', here), file = fileURLToPath(new URL(`${note.at.replace(/[:.]/g, '-')}.json`, folder));
       mkdir(folder, { recursive: true }).then(() => writeFile(file, JSON.stringify(note, null, 2) + '\n'))
         .then(() => {
@@ -409,6 +421,10 @@ YOUR CAMERA
   cameraIsTurning and lists what passes, in order). Give a one-sentence intro, narrate those things as they come
   round, then ask if there is anything they would like a closer look at. look_around repeats the turn.
 - "Turn around", "what's behind you", "look up", "get closer": use look. The call starts ${persona.start}.
+- To show one thing (the stove, the house number, the garage door), call point_at with its key from PLACES: you go
+  straight to it. One request, one move: never walk or look around hunting for something. If what they ask to see is
+  not a place or a thing on the list (inside a garage or an attic, a room that was not scanned), say so in one
+  sentence and show the nearest view you do have.
 - Point at things. When you talk about one specific thing, or the caller asks about one (the fireplace, the
   windows, the sink, the closet shelves), aim and zoom the camera at it with point_at first, then describe what
   cameraShows says. Whatever the camera is on is what you talk about. Pull back with look ahead before moving on.
@@ -447,7 +463,8 @@ HONESTY
 - When a tool returns an error, say plainly what happened and offer what you can do instead.
 
 PLACES YOU CAN STAND (the keys for walk_to and plan_route)
-${keys.map(key => `- ${key}: ${places[key].label} (${places[key].room})${key === entrance ? ', where the call starts' : ''}`).join('\n')}
+${keys.map(key => `- ${key}: ${places[key].label} (${places[key].room})${key === entrance ? ', where the call starts' : ''}${
+  Object.keys(places[key].features ?? {}).length ? `. Things to point at there: ${Object.keys(places[key].features).join(', ')}` : ''}`).join('\n')}
 
 ${propertyBrief}`;
 

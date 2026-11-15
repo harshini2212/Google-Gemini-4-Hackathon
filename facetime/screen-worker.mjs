@@ -10,7 +10,7 @@
 //   view.paints   { [stop]: { rgb, label } }             the stop's wall (the bundle's walls/) painted this colour
 //   view.sources  { [sweepId]: { file, label } }         another panorama (a staged room) in place of the scan
 //   view.spin     { id, arc: 'full' | [from, to], seconds }   one slow turn to show the whole room, once per id
-// The picture is drawn upright, for a phone held upright, unless TOUR_ORIENTATION=landscape (see W and H below).
+// The picture is drawn wide, for a phone held sideways, unless TOUR_ORIENTATION=portrait (see W and H below).
 //
 // Everything about a property comes from one folder, its bundle (`mediaDir`):
 //   tour.json          { property: { name, address, caption }, stops: { [key]: { label, detail, sweep, yaw, pitch } },
@@ -33,12 +33,13 @@ import sharp from 'sharp';
 import { finishes } from '../shared/tour.mjs';
 import { loadWalls, tintPano } from './paint.mjs';
 
-// The frame handed over is wider than it is high, 1280 x 720. A caller holds the phone upright, and FaceTime turns
-// that frame a quarter turn to fill the screen. So the picture is drawn upright, 720 x 1280, and laid on its side
-// in the frame (turned(), below), which FaceTime then stands up again. TOUR_ORIENTATION=landscape draws it wide
-// instead, for a phone held sideways.
+// The frame handed over is wider than it is high, 1280 x 720, and FaceTime shows it full screen on a phone held
+// sideways. With TOUR_ORIENTATION=portrait the picture is drawn upright instead, 720 x 1280, and laid on its side in
+// the frame (turned(), below): on a phone whose screen is locked upright, FaceTime stands that up again.
 const { width: FW, height: FH, fps } = workerData;
-const portrait = process.env.TOUR_ORIENTATION !== 'landscape';
+// The wide picture is the default: FaceTime shows it full screen on a phone held sideways, which is how a caller
+// holds a phone to look round a room. TOUR_ORIENTATION=portrait draws it upright instead, for a phone held upright.
+const portrait = process.env.TOUR_ORIENTATION === 'portrait';
 const W = portrait ? FH : FW, H = portrait ? FW : FH;
 const N = W * H;
 const S = W / (portrait ? 720 : 1280);    // every size below is drawn for 1280 x 720, or upright for 720 x 1280, and scaled
@@ -159,6 +160,9 @@ function some(text, width, most) {
 // measured on a call: x from 80 to 640; below y = 190 (the name of the call); left of x = 500 down to y = 430
 // (the caller's own picture); left of x = 590 below y = 880 (the buttons).
 const CLEAR = { left: 84, right: 636, top: 230, tile: [500, 454], buttons: [590, 880] };
+// Wide, on a phone held sideways: the rows FaceTime shows are about 65 to 655; the caller's own picture covers
+// x 82 to 276, y 92 to 203. Words keep inside these.
+const WIDE = { top: 84, bottom: 636, left: 200, right: 1010 };
 const serif = text => 1.08 * span(text);    // the serif face runs a little wider than the sans
 
 /**
@@ -166,25 +170,33 @@ const serif = text => 1.08 * span(text);    // the serif face runs a little wide
  * fits between FaceTime's controls, and the guide says the rest aloud.
  */
 function captionUpright({ title = '', chip }) {
-  // One line at 54 px where that fits before the buttons, smaller down to 40 px, and beyond that two lines.
+  // One line at 54 px where that fits before the buttons, smaller down to 40 px, and beyond that whole words on two
+  // lines, then three. Nothing is cut short: a caller reads a clipped caption as a picture that does not fit.
   const room = CLEAR.buttons[0] - CLEAR.left;
   let rows = [String(title)], size = Math.min(54, room / serif(title));
-  if (size < 40) {
-    rows = some(title, Math.ceil(String(title).length / 2) + 3, 2);
+  for (let most = 2; size < 40 && most <= 3; most++) {
+    rows = lines(title, Math.ceil(String(title).length / most) + 3);
     size = Math.min(44, room / Math.max(...rows.map(serif)));
   }
   const first = 1150 - (rows.length - 1) * size * 1.14;
-  const label = chip && (chip.label.length > 30 ? `${chip.label.slice(0, 29).trimEnd()}…` : chip.label);
-  const swatch = chip?.color ? 28 : 0, chipWidth = chip ? 36 + swatch + label.length * 11.5 : 0, top = first - size * 0.8 - 58;
+  // The chip the same way: one line at 20 px, smaller down to 16 px, and beyond that whole words on two lines.
+  const swatch = chip?.color ? 28 : 0, inner = room - 36 - swatch, LETTER = 0.575;
+  let words = chip ? [String(chip.label)] : [], type = 20;
+  if (chip) {
+    type = Math.max(16, Math.min(20, inner / (LETTER * words[0].length)));
+    if (LETTER * type * words[0].length > inner) words = some(words[0], Math.floor(inner / (LETTER * type)), 2);
+  }
+  const chipWidth = 36 + swatch + Math.max(0, ...words.map(row => row.length)) * LETTER * type;
+  const chipHeight = 16 + words.length * (type + 6), top = first - size * 0.8 - 16 - chipHeight;
   return `
     <defs><radialGradient id="shade" gradientUnits="userSpaceOnUse" cx="140" cy="1190" r="560" gradientTransform="translate(140 1190) scale(1.2 0.72) translate(-140 -1190)">
       <stop offset="0" stop-color="#000" stop-opacity="0.62"/><stop offset="0.5" stop-color="#000" stop-opacity="0.4"/><stop offset="1" stop-color="#000" stop-opacity="0"/>
     </radialGradient></defs>
     <rect x="0" y="760" width="720" height="520" fill="url(#shade)"/>
     <g ${SANS}>
-      ${chip ? `<rect x="${CLEAR.left}" y="${top}" width="${chipWidth}" height="42" rx="21" fill="#fff" fill-opacity="0.94"/>
-      ${swatch ? `<circle cx="${CLEAR.left + 24}" cy="${top + 21}" r="11" fill="${chip.color}" stroke="#0d1413" stroke-opacity="0.25"/>` : ''}
-      <text x="${CLEAR.left + (chipWidth + swatch) / 2}" y="${top + 28}" text-anchor="middle" font-size="20" font-weight="600" fill="#0d1413">${esc(label)}</text>` : ''}
+      ${chip ? `<rect x="${CLEAR.left}" y="${top}" width="${chipWidth.toFixed(1)}" height="${chipHeight.toFixed(1)}" rx="21" fill="#fff" fill-opacity="0.94"/>
+      ${swatch ? `<circle cx="${CLEAR.left + 24}" cy="${(top + chipHeight / 2).toFixed(1)}" r="11" fill="${chip.color}" stroke="#0d1413" stroke-opacity="0.25"/>` : ''}
+      ${words.map((row, index) => `<text x="${(CLEAR.left + (chipWidth + swatch) / 2).toFixed(1)}" y="${(top + 8 + index * (type + 6) + type).toFixed(1)}" text-anchor="middle" font-size="${type.toFixed(1)}" font-weight="600" fill="#0d1413">${esc(row)}</text>`).join('')}` : ''}
       ${rows.map((row, index) => `<text x="${CLEAR.left}" y="${first + index * size * 1.14}" ${SERIF} font-size="${size.toFixed(1)}" fill="#fff">${esc(row)}</text>`).join('')}
     </g>`;
 }
@@ -192,24 +204,30 @@ function captionUpright({ title = '', chip }) {
 /** The lower third: where we are, what it is, and which data layer the picture comes from. Above, which property this is. */
 function caption({ title = '', detail = '', source = '', chip }) {
   if (portrait) return captionUpright({ title, chip });
+  // A phone held sideways is wider than this picture, so FaceTime fills its width and cuts about 65 px off the top
+  // and off the bottom (WIDE, measured on a call); the caller's own picture lies over the top left, and FaceTime's
+  // controls come and go at the two ends. So the words keep to the middle, between those cuts: the property up top,
+  // then what is on show, the place, and the data layer the picture comes from. The line of detail is not drawn:
+  // there is no room for it above the cut, and the guide says it aloud.
   const swatch = chip?.color ? 28 : 0;      // a chip without a colour is words only
-  const chipWidth = chip ? 36 + swatch + chip.label.length * 11.5 : 0;
-  const pill = Math.min(Math.round(93 + 19 * span(header) + 0.4 * header.length), 1200);
+  const label = chip ? some(chip.label, 72, 1)[0] : '', type = chip ? Math.max(15, Math.min(20, 820 / (0.575 * label.length))) : 20;
+  const chipWidth = chip ? 36 + swatch + label.length * 0.575 * type : 0;
+  const pill = Math.min(Math.round(93 + 19 * span(header) + 0.4 * header.length), 900);
+  const size = Math.min(54, 900 / Math.max(1, serif(title))), base = WIDE.bottom - 44, top = base - size * 0.8 - 58;
   return `
     <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.6"/>
+      <stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="0.75" stop-color="#000" stop-opacity="0.62"/><stop offset="1" stop-color="#000" stop-opacity="0.62"/>
     </linearGradient></defs>
-    <rect x="0" y="520" width="1280" height="200" fill="url(#shade)"/>
+    <rect x="0" y="420" width="1280" height="300" fill="url(#shade)"/>
     <g ${SANS} text-anchor="middle">
-      ${header ? `<rect x="${640 - pill / 2}" y="26" width="${pill}" height="40" rx="20" fill="#0d1413" fill-opacity="0.62"/>
-      <circle cx="${640 - pill / 2 + 28}" cy="46" r="6" fill="#ff5a4e"/>
-      <text x="648" y="53" font-size="19" font-weight="500" fill="#fff" letter-spacing="0.4">${esc(header)}</text>` : ''}
-      ${chip ? `<rect x="${640 - chipWidth / 2}" y="528" width="${chipWidth}" height="42" rx="21" fill="#fff" fill-opacity="0.94"/>
-      ${swatch ? `<circle cx="${640 - chipWidth / 2 + 24}" cy="549" r="11" fill="${chip.color}" stroke="#0d1413" stroke-opacity="0.25"/>` : ''}
-      <text x="${640 + swatch / 2}" y="556" font-size="20" font-weight="600" fill="#0d1413">${esc(chip.label)}</text>` : ''}
-      <text x="640" y="628" ${SERIF} font-size="54" fill="#fff">${esc(title)}</text>
-      <text x="640" y="662" font-size="22" fill="#fff" fill-opacity="0.9">${esc(detail)}</text>
-      <text x="640" y="694" font-size="14" font-weight="600" fill="#fff" fill-opacity="0.7" letter-spacing="2.4">${esc(source.toUpperCase())}</text>
+      ${header ? `<rect x="${640 - pill / 2}" y="${WIDE.top}" width="${pill}" height="40" rx="20" fill="#0d1413" fill-opacity="0.62"/>
+      <circle cx="${640 - pill / 2 + 28}" cy="${WIDE.top + 20}" r="6" fill="#ff5a4e"/>
+      <text x="648" y="${WIDE.top + 27}" font-size="19" font-weight="500" fill="#fff" letter-spacing="0.4">${esc(header)}</text>` : ''}
+      ${chip ? `<rect x="${(640 - chipWidth / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${chipWidth.toFixed(1)}" height="42" rx="21" fill="#fff" fill-opacity="0.94"/>
+      ${swatch ? `<circle cx="${(640 - chipWidth / 2 + 24).toFixed(1)}" cy="${(top + 21).toFixed(1)}" r="11" fill="${chip.color}" stroke="#0d1413" stroke-opacity="0.25"/>` : ''}
+      <text x="${640 + swatch / 2}" y="${(top + 21 + type * 0.35).toFixed(1)}" font-size="${type.toFixed(1)}" font-weight="600" fill="#0d1413">${esc(label)}</text>` : ''}
+      <text x="640" y="${base}" ${SERIF} font-size="${size.toFixed(1)}" fill="#fff">${esc(title)}</text>
+      <text x="640" y="${base + 30}" font-size="14" font-weight="600" fill="#fff" fill-opacity="0.78" letter-spacing="2.4">${esc(source.toUpperCase())}</text>
     </g>`;
 }
 
@@ -250,7 +268,7 @@ async function drawSite() {
   const [ax, ay] = point(anchor), [px, py] = parking ? point(parking) : [ax, ay];
   // A label is a box that ends `right` of its spot, above or below it, and stays inside the picture.
   // (Upright that is inside what FaceTime leaves clear, once the slow push-in has run its course.)
-  const [least, most] = portrait ? [360 - (360 - CLEAR.left) / 1.08, 360 + (CLEAR.right - 360) / 1.08] : [16, 1264];
+  const [least, most] = portrait ? [360 - (360 - CLEAR.left) / 1.08, 360 + (CLEAR.right - 360) / 1.08] : [84, 1196];
   const label = (words, x, y, right, pad) => {
     const wide = Math.round(44 + 20 * span(words)), from = clamp(x + right - wide, least, most - wide);
     return `<rect x="${from}" y="${y}" width="${wide}" height="38" rx="19" fill="#0d1413" fill-opacity="0.82"/>
@@ -304,45 +322,62 @@ function inside([x, y], polygon) {
 /** A card of words in place of the camera: the recap of a visit. view.card = { title, rows: [{ label, text }], footer }. */
 async function cardImage(card) {
   if (portrait) return cardUpright(card);
-  let y = 212;
-  const rows = (card.rows ?? []).slice(0, 6).map(row => {
-    const text = lines(row.text, 74).slice(0, 2);
-    const block = `<text x="190" y="${y}" font-size="14" font-weight="600" fill="#fff" fill-opacity="0.55" letter-spacing="2.4">${esc(String(row.label).toUpperCase())}</text>`
-      + text.map((line, index) => `<text x="190" y="${y + 32 + index * 32}" font-size="25" fill="#fff">${esc(line)}</text>`).join('');
-    y += 44 + text.length * 32;
-    return block;
-  }).join('');
-  const pill = Math.min(Math.round(93 + 19 * span(header) + 0.4 * header.length), 1200);
+  // Everything between the rows FaceTime shows (WIDE): each row whole, in the largest type at which they all end
+  // above the footer; only in the smallest is a long row cut, at a word.
+  let rows = '';
+  for (const type of [25, 22, 20, 18]) {
+    const step = Math.round(type * 1.26), letters = Math.floor(62 * 25 / type);
+    let y = WIDE.top + 146, whole = true;
+    rows = '';
+    for (const row of (card.rows ?? []).slice(0, 6)) {
+      const text = type === 18 ? some(row.text, letters, 3) : lines(row.text, letters);
+      if (y + text.length * step > WIDE.bottom - 34) { whole = false; break; }
+      rows += `<text x="${WIDE.left}" y="${y}" font-size="13" font-weight="600" fill="#fff" fill-opacity="0.55" letter-spacing="2.4">${esc(String(row.label).toUpperCase())}</text>`
+        + text.map((line, index) => `<text x="${WIDE.left}" y="${y + step + index * step}" font-size="${type}" fill="#fff">${esc(line)}</text>`).join('');
+      y += text.length * step + Math.round(type * 1.25);
+    }
+    if (whole) break;
+  }
+  const pill = Math.min(Math.round(93 + 19 * span(header) + 0.4 * header.length), 900);
+  const title = String(card.title ?? 'Visit recap'), size = Math.min(44, 760 / Math.max(1, serif(title)));
   return pixels(svg(`<rect width="1280" height="720" fill="#18211f"/>
     <g ${SANS}>
       <g text-anchor="middle">
-        <rect x="${640 - pill / 2}" y="26" width="${pill}" height="40" rx="20" fill="#0d1413" fill-opacity="0.62"/>
-        <circle cx="${640 - pill / 2 + 28}" cy="46" r="6" fill="#ff5a4e"/>
-        <text x="648" y="53" font-size="19" font-weight="500" fill="#fff" letter-spacing="0.4">${esc(header)}</text>
-        <text x="640" y="148" ${SERIF} font-size="52" fill="#fff">${esc(card.title ?? 'Visit recap')}</text>
-        <text x="640" y="694" font-size="14" font-weight="600" fill="#fff" fill-opacity="0.7" letter-spacing="2.4">${esc(String(card.footer ?? '').toUpperCase())}</text>
+        <rect x="${640 - pill / 2}" y="${WIDE.top}" width="${pill}" height="40" rx="20" fill="#0d1413" fill-opacity="0.62"/>
+        <circle cx="${640 - pill / 2 + 28}" cy="${WIDE.top + 20}" r="6" fill="#ff5a4e"/>
+        <text x="648" y="${WIDE.top + 27}" font-size="19" font-weight="500" fill="#fff" letter-spacing="0.4">${esc(header)}</text>
+        <text x="640" y="${WIDE.top + 92}" ${SERIF} font-size="${size.toFixed(1)}" fill="#fff">${esc(title)}</text>
+        <text x="640" y="${WIDE.bottom - 8}" font-size="13" font-weight="600" fill="#fff" fill-opacity="0.7" letter-spacing="2.4">${esc(String(card.footer ?? '').toUpperCase())}</text>
       </g>
-      <rect x="150" y="176" width="980" height="1" fill="#fff" fill-opacity="0.18"/>
+      <rect x="${WIDE.left}" y="${WIDE.top + 112}" width="${WIDE.right - WIDE.left}" height="1" fill="#fff" fill-opacity="0.18"/>
       ${rows}
     </g>`));
 }
 
 /**
- * The card upright: the title where FaceTime's controls begin to leave room, then up to five rows of up to three
- * lines each, every line kept short of the caller's own picture and of the buttons. No footer: it would lie under them.
+ * The card upright: the title where FaceTime's controls begin to leave room, then up to six rows, every line kept
+ * short of the caller's own picture and of the buttons. Each row is whole, in the largest type at which they all end
+ * above the bottom; only in the smallest is a long row cut, at a word. No footer: it would lie under the buttons.
  */
 async function cardUpright(card) {
-  const title = String(card.title ?? 'Visit recap'), heading = some(title, Math.max(16, Math.ceil(title.length / 2) + 2), 2);
+  const title = String(card.title ?? 'Visit recap'), heading = lines(title, Math.max(16, Math.ceil(title.length / 2) + 2)).slice(0, 3);
   const size = Math.min(46, (CLEAR.tile[0] - CLEAR.left) / Math.max(...heading.map(serif)));
-  let y = 260 + (heading.length - 1) * size * 1.15 + 66, rows = '';
-  for (const row of (card.rows ?? []).slice(0, 5)) {
-    // The letters a line has room for: fewer beside the caller's own picture, and beside the buttons.
-    const letters = y + 38 < CLEAR.tile[1] ? 26 : y + 38 * 3 > CLEAR.buttons[1] ? 31 : 34;
-    const text = some(row.text, letters, 3);
-    if (y + text.length * 38 > 1180) break;
-    rows += `<text x="${CLEAR.left}" y="${y}" font-size="15" font-weight="600" fill="#fff" fill-opacity="0.55" letter-spacing="2.4">${esc(String(row.label).toUpperCase())}</text>`
-      + text.map((line, index) => `<text x="${CLEAR.left}" y="${y + 38 + index * 38}" font-size="30" fill="#fff">${esc(line)}</text>`).join('');
-    y += 38 * text.length + 44;
+  const start = 260 + (heading.length - 1) * size * 1.15 + 66;
+  let rows = '';
+  for (const type of [30, 27, 24, 21]) {
+    const step = Math.round(type * 1.27), small = type === 21;
+    let y = start, whole = true;
+    rows = '';
+    for (const row of (card.rows ?? []).slice(0, 6)) {
+      // The letters a line has room for: fewer beside the caller's own picture, and beside the buttons.
+      const letters = Math.floor((y + step < CLEAR.tile[1] ? 26 : y + step * 3 > CLEAR.buttons[1] ? 31 : 34) * 30 / type);
+      const text = small ? some(row.text, letters, 4) : lines(row.text, letters);
+      if (y + text.length * step > 1180) { whole = false; break; }
+      rows += `<text x="${CLEAR.left}" y="${y}" font-size="15" font-weight="600" fill="#fff" fill-opacity="0.55" letter-spacing="2.4">${esc(String(row.label).toUpperCase())}</text>`
+        + text.map((line, index) => `<text x="${CLEAR.left}" y="${y + step + index * step}" font-size="${type}" fill="#fff">${esc(line)}</text>`).join('');
+      y += step * text.length + Math.round(type * 1.47);
+    }
+    if (whole) break;
   }
   return pixels(svg(`<rect width="720" height="1280" fill="#18211f"/>
     <g ${SANS}>
@@ -358,8 +393,9 @@ async function planImage(view, place) {
   const all = rooms.flatMap(room => room.polygon);
   const minX = Math.min(...all.map(p => p[0])), maxX = Math.max(...all.map(p => p[0]));
   const minY = Math.min(...all.map(p => p[1])), maxY = Math.max(...all.map(p => p[1]));
-  let scale = Math.min(1000 / (maxX - minX), 470 / (maxY - minY));
-  const ox = 640 - (maxX + minX) / 2 * scale, oy = 322 + (maxY + minY) / 2 * scale;
+  // Wide, the plan sits between the property up top and the title below, inside the rows FaceTime shows.
+  let scale = Math.min(1000 / (maxX - minX), 372 / (maxY - minY));
+  const ox = 640 - (maxX + minX) / 2 * scale, oy = 326 + (maxY + minY) / 2 * scale;
   let at = ([x, y]) => [ox + x * scale, oy - y * scale];
   if (portrait) {
     // Upright the plan has what is clear of FaceTime's controls down to y = 900: the tall box left of the caller's own
@@ -671,12 +707,13 @@ function lookOf(view, place) {
   const look = view.look;
   if (!look || typeof look !== 'object') return null;
   const zoom = clamp(number(look.zoom, 1), 1, 2.5);
-  return { yaw: turn(number(look.yaw, 0)), pitch: clamp(number(look.pitch, place.pitch), -45, 45), zoom: portrait ? Math.max(1, zoom * CLOSE) : zoom };
+  return { yaw: turn(number(look.yaw, 0)), pitch: clamp(number(look.pitch, place.pitch), -45, 45), zoom: portrait ? 1 + (zoom - 1) * CLOSE : zoom };
 }
 
-// The close-ups were framed for the wide picture. Upright the picture is about half as wide, so a close-up is
-// never closer than shows as much from side to side as it did then: up to zoom 2 that is the plain view.
-const CLOSE = TAN * W / H / (Math.tan(30 * DEG) * 16 / 9);
+// The close-ups were framed for the wide picture, and upright the picture is about half as wide. Holding to the
+// width they showed then would mean no close-up at all (the stove "up close" was the same picture as the kitchen), so
+// upright she moves in half as far: zoom 2 becomes 1.5. A wide subject loses its sides; a close-up still looks like one.
+const CLOSE = 0.5;
 
 // ---- drawing --------------------------------------------------------------------------------------------------------
 

@@ -54,7 +54,24 @@ use the OpenAI key.
 | `paint.mjs`, `stage.mjs` | Paint a wall any colour keeping its light; add or change furniture with an image model and lay it back on the photo |
 | `depthwalk.mjs` | Redraws a 360 photo from a camera that has stepped away from it, using depth from the scan's mesh |
 | `rehearse.mjs`, `preview.mjs`, `call.mjs` | A rehearsal caller without a phone; the call in a browser tab; an outbound call through Chert's API |
+| `research.mjs` | The research desk: a LangChain Deep Agent that answers comparison questions during the call and writes the follow-up packet after it (see `../Deep-Agents-Pitch.md`) |
+| `after-call.mjs` | When a real call ends, texts the caller through Chert to ask how the tour went |
 | `chert-rooms.mjs`, `greet.mjs` | From the Chert starter: how the agent joins calls and when it greets |
+
+## How the picture fits the phone
+
+The picture is wide (1280 by 720), for a phone held sideways, which FaceTime fills edge to edge. A phone is wider than
+16:9, so FaceTime cuts about 65 rows off the top and the bottom and lays the caller's own picture over the top left;
+every caption, the aerial's labels, the floor plan and the recap card are drawn inside what is left (`WIDE` in
+`screen-worker.mjs`, measured from a screenshot of a real call). `TOUR_ORIENTATION=portrait` draws every scene upright
+instead (720 by 1280, sent lying on its side) for a phone held upright, and the browser preview follows it.
+
+## The text after the call
+
+When a real call ends, `after-call.mjs` asks the caller by iMessage, through Chert, how the tour went. Chert does not
+tell an agent who called, so the text goes to the number the caller gave Ellie during the call, or else to
+`OPEN_HOUSE_FEEDBACK_TO` in `.env.local`. Chert only delivers to a phone that has joined the project. Each attempt
+writes one line to `visits/after-call.log`. `OPEN_HOUSE_FEEDBACK_TEXT=0` turns it off.
 
 ## Rules Chert enforces
 

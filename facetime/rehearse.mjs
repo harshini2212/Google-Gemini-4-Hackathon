@@ -122,7 +122,13 @@ if (latest && ffmpeg) {
     '-i', '-', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', join(out, 'picture.mp4')], { stdio: ['pipe', 'ignore', 'inherit'] });
   film.stdin.on('error', () => {});
   recordingFrom = Date.now();
-  filmTimer = setInterval(() => film.stdin.write(Buffer.from(picture().data)), 1000 / FPS);
+  // The picture can arrive smaller for a while (the network adapts it): bring every frame to the film's size, in order.
+  let writing = Promise.resolve();
+  filmTimer = setInterval(() => {
+    const frame = picture(), bytes = Buffer.from(frame.data);
+    writing = writing.then(async () => film.stdin.write(frame.width === first.width && frame.height === first.height ? bytes
+      : await sharp(bytes, { raw: { width: frame.width, height: frame.height, channels: 4 } }).resize(first.width, first.height, { fit: 'fill' }).raw().toBuffer())).catch(() => {});
+  }, 1000 / FPS);
 }
 
 await rooms.updateRoomMetadata(roomName, JSON.stringify({ chert_bridge_ready: true }));
@@ -133,7 +139,30 @@ log(`first words ${((Date.now() - greetedIn) / 1000).toFixed(1)} s after bridge_
 await reply(25000);
 await snapshot('0-greeting');
 
-for (const [index, question] of questions.entries()) {
+for (const [index, line] of questions.entries()) {
+  // A question that starts with ^ is spoken over her: two seconds into her next stretch of talking.
+  const cutIn = line.startsWith('^'), question = cutIn ? line.slice(1) : line;
+  if (cutIn) {
+    // Wait for her to be two and a half seconds into talking (the question before this one does not wait for her to finish).
+    let since = 0;
+    await waitUntil(() => { if (Date.now() - lastLoud < 300) since ||= Date.now(); else since = 0; return since && Date.now() - since > 2500; }, 30000);
+    log(`caller cuts in${since ? '' : ' (she was not talking)'}: ${question}`);
+    const audio = speech(question), from = Date.now();
+    if (recordingFrom) place(audio, sampleNow());
+    queue = audio;
+    await waitUntil(() => Date.now() - lastLoud > 600, 15000);
+    log(`  she stopped talking ${Math.max(0, (Date.now() - from - 600) / 1000).toFixed(1)} s after the caller started`);
+    await pause(Math.max(0, audio.length / RATE * 1000 - (Date.now() - from)));
+    const ended = Date.now();
+    spoke = false;
+    await waitUntil(() => spoke, 15000);
+    log(`  she started answering after ${((Date.now() - ended) / 1000).toFixed(1)} s`);
+    if (questions[index + 1]?.startsWith('^')) continue;      // the next line is spoken over this answer
+    await reply();
+    await pause(1600);
+    await snapshot(`${index + 1}-after-question`);
+    continue;
+  }
   log(`caller: ${question}`);
   const audio = speech(question);
   if (recordingFrom) place(audio, sampleNow());
@@ -143,6 +172,7 @@ for (const [index, question] of questions.entries()) {
   spoke = false;
   await waitUntil(() => spoke, 15000);
   log(`  she started answering after ${((Date.now() - asked) / 1000).toFixed(1)} s`);
+  if (questions[index + 1]?.startsWith('^')) continue;        // the next line is spoken over this answer
   await reply();
   await pause(1600);                         // let the picture finish its change
   await snapshot(`${index + 1}-after-question`);

@@ -6,9 +6,9 @@ import { AccessToken, AgentDispatchClient, RoomServiceClient } from 'livekit-ser
 
 const { LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, AGENT_NAME } = process.env;
 const port = Number(process.env.PREVIEW_PORT || 5190);
-// The agent sends the picture on its side for a phone held upright (TOUR_ORIENTATION, portrait unless set to landscape):
-// stand it up again here, as FaceTime does.
-const upright = (process.env.TOUR_ORIENTATION || 'portrait') !== 'landscape';
+// With TOUR_ORIENTATION=portrait the agent sends the picture on its side, for a phone held upright: stand it up
+// again here, as FaceTime does. Otherwise the picture is wide, as on a phone held sideways.
+const upright = process.env.TOUR_ORIENTATION === 'portrait';
 const http = LIVEKIT_URL.replace(/^ws/, 'http');
 const rooms = new RoomServiceClient(http, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 const dispatch = new AgentDispatchClient(http, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);

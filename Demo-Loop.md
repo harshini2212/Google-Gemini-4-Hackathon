@@ -48,11 +48,13 @@ One caller, one unbroken call. Times are targets for the presenter, not rules fo
 | 0:45 | "Could that long wall be red?" | "Here's a paint preview." Takes the furniture out and says so. | Red rolls across the long wall, shadows intact | The wow beat |
 | 1:00 | "Let's see the kitchen. Show me the stove up close." | Walks there, turns through the room narrating what passes, then zooms on the range. | Walk, slow turn, close-up | She knows what her camera sees |
 | 1:30 | "What's the asking price, and the taxes?" | "$215,000 asking. Taxes are about $5,900 a year." | Kitchen | CoStar, said like a person |
+| 1:38 | "How does that compare with similar homes nearby?" | "I'm having that looked into." She carries on with the tour; about twenty seconds later she presents the answer, sources named. | A comparison card appears over the tour | LangChain Deep Agents: a lead agent and two specialists working the CoStar listings, off the voice path |
 | 1:45 | "Take me to the primary bedroom and put a bed in it." | Walks there, shows the room, stages it. | Walk, slow turn, furnished bedroom | Two tools from one sentence |
 | 2:10 | "What's behind you?" | Turns around and describes the doorway to the primary bath. | Camera swings 180 degrees | Spatial awareness |
 | 2:20 | "Show me the house from above." | Shows the lot. "About 40 by 110 feet. A 2023 analysis flagged the roof; this 2026 image shows even shingles. I'd confirm roof work with the listing agent." | Aerial with the house and driveway marked | Vexcel and CoStar joined, honestly |
 | 2:45 | "Is it in a flood zone?" | "That's not in the record. I'll confirm with the listing agent." | Aerial | She does not make things up |
-| 2:55 | *(presenter)* | "Call her yourself." | Floor plan | Judge's own phone |
+| 2:50 | "That's all for today. I'm Sam, I liked the kitchen, and I'd like to see it in person." | Reads the recap back and says goodbye. Behind the call, the research desk writes a follow-up, a brief for the listing agent and a table of comparable homes. | Visit recap card | She closes like a guide, and the work continues after the call |
+| 3:00 | *(presenter)* | "Call her yourself." | | Judge's own phone |
 
 If a judge goes off script, that is the demo working. Every room is walkable, every question either has a sourced answer or an honest "I'll confirm".
 
@@ -63,7 +65,7 @@ Everything on camera is the Matterport 360 photography taken at the house, one p
 | Judging criterion | Weight | Where it lands |
 | --- | --- | --- |
 | Use of the data | 30% | Scan measurements in every room, listing price and taxes at 1:30, two aerial dates compared with the record at 2:20 |
-| Agentic depth | 30% | She plans from two facts about the caller at 0:12, chains tools from one sentence at 1:45, and acts on the building at 0:30 and 0:45 |
+| Agentic depth | 30% | She plans from two facts about the caller at 0:12, chains tools from one sentence at 1:45, acts on the building at 0:30 and 0:45, and hands research to a team of agents at 1:38 and at goodbye (`Deep-Agents-Pitch.md`) |
 | Usefulness | 25% | A brokerage could switch this on Monday: every out-of-town or after-hours lead gets a tour |
 | Demo and polish | 15% | It is a FaceTime call on a real phone, and she moves like a person |
 
