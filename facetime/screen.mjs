@@ -10,10 +10,12 @@ export const FPS = 15;
 const here = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Loads the tour pictures and returns the screen once every picture is in memory.
+ * Loads a property's pictures and returns the screen once it can draw.
+ * `mediaDir` is the property's bundle: tour.json, a panorama per stop and the aerial (screen-worker.mjs has the layout).
+ * Left out, it is the folder named by OPEN_HOUSE_MEDIA, or the first tour in data/demo.
  * `show(view)` moves the picture to a tour view; `play(onFrame)` starts handing over RGBA frames; `pause()` stops.
  */
-export function createScreen({ mediaDir = join(here, '../data/demo') } = {}) {
+export function createScreen({ mediaDir = process.env.OPEN_HOUSE_MEDIA || join(here, '../data/demo') } = {}) {
   const worker = new Worker(new URL('./screen-worker.mjs', import.meta.url), { workerData: { width: WIDTH, height: HEIGHT, fps: FPS, mediaDir } });
   let onFrame = null;
   return new Promise((resolve, reject) => {

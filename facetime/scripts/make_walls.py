@@ -114,14 +114,120 @@ WALLS = {
 # 9530 Alex Springs Lane. Its walls and trim are both white, so every edge here is traced, none found by colour.
 # "aim" is where the camera turns to show the wall: yaw in degrees from the stop's own yaw, then pitch.
 ALEX_SPRINGS = {
+    "living_room": {
+        "label": "the long wall on the right",
+        "aim": (84, -2),
+        "views": [{
+            # The whole wall plane, corner to corner: around the hallway arch (its rounded inner faces stay white)
+            # and down the narrow strip between the arch and the corner.
+            "yaw": 2, "fov": 96, "size": 3000,
+            "wall": [[(171.5, 917.5), (250, 899.5), (500, 840.5), (700, 791), (740, 781.5), (770, 776), (800, 771),
+                      (820, 769), (845, 768), (1000, 769), (1500, 770), (2000, 771), (2500, 773), (2750, 775.5),
+                      (2794.5, 776),                                                    # ceiling, left to right
+                      (2793.5, 1100), (2787.5, 1500), (2783.5, 2000), (2781, 2150), (2780.5, 2193.5),  # right corner
+                      (2727, 2193.5), (2727, 2100), (2730, 1900), (2731, 1600), (2736, 1300), (2734, 1211),
+                      (2728, 1205), (2710, 1196.5), (2680, 1180.5), (2640, 1162), (2600, 1149), (2560, 1138),
+                      (2520, 1136), (2480, 1137), (2430, 1143.5), (2380, 1162.5), (2340, 1177.5), (2310, 1191.5),
+                      (2290, 1201.5), (2278, 1207), (2272, 1215),                       # over the arch, right to left
+                      (2271, 1300), (2270, 1600), (2264, 1900), (2261.5, 2150), (2261, 2195.5),
+                      (2150, 2194.5), (1850, 2194.5), (1700, 2193.5), (1550, 2192.5), (1400, 2192.5),
+                      (1250, 2191.5), (1100, 2190.5), (200, 2190.5), (171.5, 2191)]],   # baseboard, right to left
+            "holes": [
+                [(1447.5, 1990), (1488.5, 1990), (1488.5, 2052), (1447.5, 2052)],       # open cable box
+                [(1556.5, 1991.5), (1602, 1991.5), (1602, 2063), (1556.5, 2063)],       # outlet
+                [(2188, 1473), (2235, 1473), (2235, 1542), (2188, 1542)],               # light switch
+            ],
+        }],
+    },
+    "primary_bedroom": {
+        "label": "the far wall",
+        "aim": (2, -3),
+        "views": [{
+            "yaw": 177, "fov": 60, "size": 2600,
+            "wall": [[(308, 743.5), (400, 743), (800, 740), (1300, 740.5), (1800, 738), (2250, 738.5), (2311, 738),
+                      (2319, 900), (2323, 1400), (2338, 1950), (2339, 1979.5),
+                      (1900, 1990.5), (1400, 2003), (900, 2017), (400, 2033), (321, 2036.5),
+                      (320, 1950), (315.5, 1400), (309, 900)]],
+            "holes": [
+                [(824.5, 1828.5), (865.5, 1828.5), (865.5, 1892), (824.5, 1892)],       # outlet
+                [(1904.5, 1800), (1949, 1800), (1949, 1863.5), (1904.5, 1863.5)],       # cable plate
+                [(2115.5, 1798), (2156.5, 1798), (2156.5, 1863.5), (2115.5, 1863.5)],   # outlet
+            ],
+        }],
+    },
+    "dining_area": {
+        "label": "the wall with the white door",
+        "aim": (-6, -3),
+        "views": [{
+            # Corner to corner: the wall carries on above the door and down the sliver to its right.
+            "yaw": 18, "fov": 84, "size": 3000,
+            "wall": [[(320, 787), (1000, 796), (2200, 812.5), (2648, 819.5), (2649.5, 1300), (2651, 2000),
+                      (2651, 2401), (2007, 2400), (1500, 2401), (900, 2399.5), (318, 2402), (319.5, 1600),
+                      (320, 1000)]],
+            "holes": [
+                [(2006.5, 1015.5), (2636, 1018.5), (2634, 2000), (2632, 2440), (2004.5, 2440)],   # door and casing
+                [(1417, 2142), (1475, 2142), (1475, 2231), (1417, 2231)],                         # outlet
+                # the two chandelier shades that hang in front of the top of the wall
+                [(1185, 760), (1195, 787), (1215, 811), (1245, 825), (1287, 834), (1327, 837), (1367, 832),
+                 (1401, 821), (1425, 805), (1437, 788), (1440, 760)],
+                [(1497, 790), (1484, 808), (1480, 823), (1481, 838), (1495, 857), (1519, 871), (1550, 880),
+                 (1583, 884), (1617, 883), (1651, 877), (1681, 865), (1704, 852), (1714, 838), (1712, 820),
+                 (1702, 802), (1686, 790)],
+            ],
+        }],
+    },
+    "bedroom_2": {
+        "label": "the wall with the window",
+        "aim": (0, -3),
+        "views": [{
+            "yaw": 43, "fov": 66, "size": 2600,
+            "wall": [[(178.5, 548.5), (300, 549.5), (700, 548), (1150, 552.5), (1700, 546.5), (2300, 543),
+                      (2399, 541.5), (2394, 1400), (2388.5, 2325.5),
+                      (2300, 2324), (1800, 2318), (1300, 2308.5), (800, 2301.5), (300, 2290.5), (165, 2288),
+                      (172, 1400)]],
+            "holes": [
+                [(393.5, 821.5), (1038, 823.5), (1032.5, 1894), (1063, 1911.5), (1063, 1934.5), (1039.5, 1936),
+                 (1039.5, 1961), (362.5, 1949), (362.5, 1927), (328.5, 1926.5), (328.5, 1914.5), (384, 1893)],  # window, sill, apron
+                [(1264.5, 2036), (1326, 2026), (1343.5, 2118.5), (1281, 2130)],          # outlet (it hangs crooked)
+            ],
+        }],
+    },
+    "living_room_front": {
+        "label": "the long wall at the far end",
+        "aim": (2, -4),
+        "views": [{
+            # The living_room wall again, seen from the entry end of the room: the same outline from further off.
+            "yaw": -88, "fov": 54, "size": 2600,
+            "wall": [[(162, 746), (200, 736), (400, 694.5), (600, 651), (690, 632), (720, 629.5), (760, 627.5),
+                      (800, 627.5), (1100, 635.5), (1700, 650.5), (2000, 658.5), (2300, 667), (2381, 669.5),
+                      (2378, 800), (2368.5, 1150), (2363, 1500), (2359, 1800), (2358.5, 1837),      # right corner
+                      (2314, 1837), (2315, 1800), (2321, 1500), (2331, 1150), (2333, 1027),
+                      (2325, 1022), (2310, 1015), (2285, 1000), (2250, 982), (2210, 967.5), (2170, 959.5),
+                      (2130, 959.5), (2090, 964.5), (2050, 974.5), (2010, 991.5), (1980, 1003.5), (1962, 1013.5),
+                      (1954, 1022),                                                     # over the arch, right to left
+                      (1952, 1150), (1946.5, 1500), (1937, 1800), (1936.5, 1837),
+                      (1500, 1840), (900, 1844), (300, 1848), (150.5, 1849),            # baseboard
+                      (151, 1800), (156.5, 1400), (160.5, 900)]],
+            "holes": [
+                [(1264, 1677), (1299, 1677), (1299, 1727.5), (1264, 1727.5)],           # open cable box
+                [(1355.5, 1674.5), (1391.5, 1674.5), (1391.5, 1734), (1355.5, 1734)],   # outlet
+                [(1876.5, 1241), (1916.5, 1241), (1916.5, 1299), (1876.5, 1299)],       # light switch
+            ],
+        }],
+    },
 }
+
+# tintPano's `level` for a white wall: how bright a white wall in full light is in the scan (white paint reflects
+# about 85% of the light, which is 237 of 255). A colour painted over white then comes out as dark against the
+# white as real paint would, in the wall's own light and shade, and warm white leaves the wall as bright as it was.
+WHITE_WALL = 237
 
 PROPERTIES = {
     "a5": {"model": MODEL_ID, "tour": "data/demo/tour.json", "output": "facetime/media/walls",
            "walls": WALLS, "unlisted": UNLISTED},
     "alex-springs": {"model": "ft9fdh4k36m", "tour": "facetime/media/alex-springs/tour.json",
                      "panoramas": "facetime/media/alex-springs", "output": "facetime/media/alex-springs/walls",
-                     "walls": ALEX_SPRINGS},
+                     "walls": ALEX_SPRINGS, "level": WHITE_WALL},
 }
 
 
@@ -221,6 +327,8 @@ def make(name, cache, output, preview):
         index[stop] = {"file": file, "label": wall["label"]}
         if "aim" in wall:                    # where the camera turns to show the wall: yaw from the stop's own, pitch as is
             index[stop]["yaw"], index[stop]["pitch"] = wall["aim"]
+        if "level" in place:                 # tintPano's fourth argument for this wall
+            index[stop]["level"] = place["level"]
         if preview:
             preview.mkdir(parents=True, exist_ok=True)
             faces = cache / "matterport" / place["model"] / "faces"

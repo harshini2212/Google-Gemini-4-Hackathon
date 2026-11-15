@@ -44,7 +44,8 @@ const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, { identity: b
 token.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
 const call = await chert('POST', '/calls', { direction: 'outbound', mode: 'customer_managed', line_id: line.id, destination,
   media: { audio: true, video: true }, livekit_url: LIVEKIT_URL, participant_token: await token.toJwt(),
-  remote_participant_identity: guide.identity, when_busy: 'queue' });
+  remote_participant_identity: guide.identity, when_busy: 'queue' })
+  .catch(async error => { await rooms.deleteRoom(room).catch(() => {}); console.error(error.message); process.exit(1); });
 const id = call.data?.id ?? call.id ?? call.call?.id ?? call.call_id;
 console.log(JSON.stringify(call, (key, value) => /token|secret|key/i.test(key) ? '<hidden>' : value).replace(/\+\d{7,}/g, m => '+…' + m.slice(-4)).slice(0, 700));
 console.log(`Calling ${destination.slice(0, -4).replace(/\d/g, '•')}${destination.slice(-4)} · call ${id}`);

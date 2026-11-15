@@ -122,6 +122,17 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
   const pointsFor = key => talkingPoints[places[key].kind] ?? (key === entrance ? talkingPoints.entry
     : talkingPoints[places[key].stop] ?? talkingPoints[POINTS[String(places[key].room).toLowerCase()]]);
 
+  /** The spots around `from`, nearest first: where she is, the rest of that room, then one and two steps away. */
+  const around = from => {
+    const seen = new Set([from, ...keys.filter(key => places[key].room === places[from].room)]);
+    let ring = [...seen];
+    for (let step = 0; step < 2; step++) {
+      ring = ring.flatMap(key => places[key].leadsTo).filter(key => places[key] && !seen.has(key) && seen.add(key));
+    }
+    return [...seen];
+  };
+  const nearest = (from, test) => around(from).find(test) ?? null;
+
   /** The view the screen draws: where she stands, which way she looks, and what she has changed. */
   const standAt = (view, key) => {
     const place = places[key];
@@ -140,7 +151,7 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
   /** Arriving in a room she has not shown yet starts that turn, so the caller sees the whole room first. */
   const enter = (view, key) => {
     const next = standAt(view, key), room = places[key].room;
-    if (key === entrance || outdoors(key) || view.seen?.[room]) return next;
+    if (key === entrance || outdoors(key) || ['entry', 'hallway', 'laundry'].includes(places[key].kind) || view.seen?.[room]) return next;
     return turnThrough({ ...next, seen: { ...view.seen, [room]: true } });
   };
   const turning = (view, key) => {
@@ -219,8 +230,7 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
       (view, { color, name }) => {
         if (view.mode !== 'interior') return { view, result: { error: 'You are not in a room. Walk to one first.' } };
         // Paint is mapped from one spot in each room: step over to it if she is elsewhere in that room.
-        const room = places[view.at].room;
-        const key = [view.at, ...keys].find(k => places[k].room === room && places[k].stop && walls[places[k].stop]);
+        const key = nearest(view.at, k => Boolean(places[k].stop && walls[places[k].stop]));
         if (!key) return { view, result: { error: `No wall is mapped for paint in this room. Rooms you can paint in: ${[...new Set(keys.filter(k => places[k].stop && walls[places[k].stop]).map(label))].join(', ') || 'none yet'}.` } };
         const stop = places[key].stop, paints = { ...view.paints };
         if (color === 'original') delete paints[stop];
@@ -231,18 +241,38 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
         }
         // Face the wall being painted, when it is not straight ahead of where she presents the room from.
         const wall = walls[stop], facing = wall.yaw ? { direction: 'wall', yaw: wall.yaw, pitch: wall.pitch ?? places[key].pitch, zoom: 1 } : null;
-        return { view: { ...standAt(view, key), look: facing, paints },
+        // Paint would tint furniture standing in front of the wall, so a furniture preview at this spot comes out first.
+        const sources = { ...view.sources }, cleared = color !== 'original' && Boolean(sources[places[key].sweep]);
+        if (cleared) delete sources[places[key].sweep];
+        return { view: { ...standAt(view, key), look: facing, paints, sources },
           result: color === 'original' ? { wall: walls[stop].label, restored: 'the scanned wall' }
-            : { wall: walls[stop].label, painted: name, note: 'This is a paint preview on the Matterport scan. Say so.' } };
+            : { wall: walls[stop].label, painted: name, note: 'This is a paint preview on the Matterport scan. Say so.',
+              ...(cleared ? { furnitureRemoved: 'The furniture preview here was taken out so the wall shows. Say so in a few words.' } : {}) } };
       }),
     tool('stage_room', 'Add, remove or change furniture and finishes in the room on camera (a sofa, a desk by the window, a bed, a style like 1920s vintage, darker floors, take the rug out). A preset appears at once. Any other request takes about twelve seconds to appear: say you are setting it up and keep talking; you are told when it is on screen.',
       { request: { type: 'string', description: 'What to change, in plain words, as the caller wants it.' },
         preset: { type: 'string', description: 'The id of a furniture preset offered at this spot, when one fits the request. Otherwise an empty string.' } },
       (view, { request, preset }, call) => {
         if (view.mode !== 'interior') return { view, result: { error: 'You are not in a room. Walk to one first.' } };
-        const place = places[view.at], ready = (presets[place.stop] ?? []).find(item => item.id === preset);
-        if (ready) return { view: { ...standAt(view, view.at), sources: { ...view.sources, [place.sweep]: { file: ready.file, label: ready.label } } },
-          result: { onScreen: ready.label, note: 'This is an AI staging preview. Say so.' } };
+        // Furniture presets are made from one spot in a room: step over to the one nearby that fits the request best.
+        const words = (String(request).toLowerCase().match(/[a-z]{3,}/g) ?? []).filter(word => !['the', 'and', 'for', 'put', 'add', 'here', 'this', 'that', 'room', 'with', 'some', 'make', 'can', 'you', 'show', 'furnish', 'furniture'].includes(word));
+        const fit = item => words.filter(word => `${item.id} ${item.label} ${item.request ?? ''}`.toLowerCase().includes(word)).length;
+        const offers = around(view.at).flatMap((key, order) => (presets[places[key].stop] ?? []).map(item =>
+          ({ key, item, score: (item.id === preset && key === view.at ? 100 : 0) + fit(item) * 10 + (key === view.at ? 5 : 0) - order / 100 })));
+        const best = offers.sort((a, b) => b.score - a.score)[0];
+        // Step away only for a preset that fits what was asked, or from a doorway or hall, which has no room of its own to furnish.
+        const passing = ['entry', 'hallway'].includes(places[view.at].kind) || view.at === entrance;
+        const at = best && (best.key === view.at || (!(presets[places[view.at].stop] ?? []).length && (best.score >= 10 || passing))) ? best.key : view.at;
+        const place = places[at], offered = presets[place.stop] ?? [];
+        const generic = words.length === 0;      // "furnish this room": any preset made for this spot will do
+        const ready = offered.find(item => item.id === preset) ?? (best?.key === at && (at !== view.at || best.score >= 10 || generic) ? best.item : null);
+        view = standAt(view, at);
+        // The same the other way round: furniture goes into the room as scanned, so paint at this spot comes off.
+        const paints = { ...view.paints }, unpainted = Boolean(place.stop && paints[place.stop]);
+        if (unpainted) delete paints[place.stop];
+        const unpaintedNote = unpainted ? { paintRemoved: 'The paint preview here was taken off to show the furniture. Say so in a few words.' } : {};
+        if (ready) return { view: { ...standAt(view, view.at), paints, sources: { ...view.sources, [place.sweep]: { file: ready.file, label: ready.label } } },
+          result: { onScreen: ready.label, note: 'This is an AI staging preview. Say so.', ...unpaintedNote } };
         if (!staging.stagePano) return { view, result: { error: 'Furniture staging is not available right now. Offer a paint colour instead.' } };
         const source = view.sources[place.sweep]?.file ?? scanFile(place), title = String(request).slice(0, 34);
         staging.stagePano({ source, yaw: place.yaw, pitch: place.pitch, request, name: `${view.at}-${Date.now().toString(36)}`, ...(slug ? { outDir: stagedDir } : {}) })
@@ -252,7 +282,7 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
             console.error('[guide] staging failed:', error?.message ?? error);
             call.later(current => current, `The staging preview for "${request}" did not work. Say so in one short sentence and offer a preset or a paint colour instead.`);
           });
-        return { view: standAt(view, view.at), result: { started: request, appearsIn: 'about twelve seconds', note: 'Keep talking about the room meanwhile. Do not say it is on screen yet.' } };
+        return { view: { ...standAt(view, view.at), paints }, result: { started: request, appearsIn: 'about twelve seconds', note: 'Keep talking about the room meanwhile. Do not say it is on screen yet.', ...unpaintedNote } };
       }),
     tool('clear_changes', 'Put the room on camera back to how it was scanned: remove the furniture preview, the paint, or both.',
       { what: pick(['furniture', 'paint', 'both'], 'What to remove.') }, (view, { what }) => {
@@ -290,7 +320,9 @@ HOW YOU TALK
 YOUR CAMERA
 - You cannot see the picture. Each tool result tells you what is now in frame (cameraShows) and what is next to
   you (nextTo). Talk only about what those and the property brief say. Never invent a fixture, view or finish.
-- Move first, then talk: when a room is mentioned ("let's go to the living room"), call walk_to, then present it.
+- Never leave silence while you act. Whenever you are about to call a tool, first say three or four words out
+  loud in the same breath ("Sure, follow me.", "Let's take a look.", "One second."), then call it. When a room is
+  mentioned ("let's go to the living room"), say that, call walk_to, then present the room from the result.
 - The first time you arrive in a room the camera turns slowly through the whole room by itself (the result says
   cameraIsTurning and lists what passes, in order). Give a one-sentence intro, narrate those things as they come
   round, then ask if there is anything they would like a closer look at. look_around repeats the turn.

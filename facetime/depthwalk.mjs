@@ -12,14 +12,18 @@
 //   bearing0 is in media/depth/index.json for each sweep: the world bearing of its panorama's yaw 0
 //   (the same number as yawOffset in media/walk.json). So a camera facing world bearing `b` has
 //   camera.yaw = sweep.bearing0 - b in that sweep's panorama, and a different yaw in the next sweep's.
+//   That is for a tripod that stood level. Where it did not (a property's index.json says how, in `lean`), the
+//   panorama and its depth are in the tripod's own leaning frame; warpGrid() allows for it, and leanBetween()
+//   keeps the two panoramas of a walk agreeing about which way is up.
 //
 // Use, for a walk from sweep A to sweep B with the camera at `at` facing world bearing `b`, `p` of the way (0 to 1):
 //   const depth = await loadDepth(), A = depth.sweeps[idA], B = depth.sweeps[idB];
 //   const [columns, rows] = gridSize(W, H, 8), count = columns * rows;
 //   const gridA = new Float32Array(2 * count), gridB = new Float32Array(2 * count);
 //   const trustA = new Float32Array(count), trustB = new Float32Array(count), amounts = new Float32Array(count);
-//   warpGrid(A, { ...at, yaw: A.bearing0 - b, pitch, roll, fov: 60 }, W, H, 8, gridA, trustA);
-//   warpGrid(B, { ...at, yaw: B.bearing0 - b, pitch, roll, fov: 60 }, W, H, 8, gridB, trustB);
+//   const lean = leanBetween(A, B, p);                                                // only matters where tripods leaned
+//   warpGrid(A, { ...at, yaw: A.bearing0 - b, pitch, roll, fov: 60, lean }, W, H, 8, gridA, trustA);
+//   warpGrid(B, { ...at, yaw: B.bearing0 - b, pitch, roll, fov: 60, lean }, W, H, 8, gridB, trustB);
 //   drawWarped(frame, panoA, gridA, W, H, 8);                                        // A, whole
 //   drawWarped(frame, panoB, gridB, W, H, 8, mixWarped(trustA, trustB, p, amounts)); // B over it, where B knows better
 // (or drawWarped(frame, panoB, gridB, W, H, 8, Math.round(p * 256)) for a plain cross-dissolve, without the trusts).
@@ -33,17 +37,21 @@ const here = dirname(fileURLToPath(import.meta.url));
 /**
  * Loads media/depth/index.json and the .bin files: { width, height, sweeps: { [id]: { depth: Float32Array, x, y, z, bearing0 } } }
  * (each sweep also carries the depth panorama's width and height, and `cube`, what warpGrid() reads the room from).
+ * Another property's depth is in its own folder: loadDepth(join(here, 'media/alex-springs/depth')). There a sweep
+ * can also carry `lean` (how its tripod stood off level) and `flat: true` (its depth is not worth walking with:
+ * cross-dissolve to and from it the plain way), and the whole can carry `reach`, the longest step in metres
+ * that is worth walking with depth (cross-dissolve a longer one the plain way too).
  */
 export async function loadDepth(folder = join(here, 'media/depth')) {
   const index = JSON.parse(await readFile(join(folder, 'index.json'), 'utf8'));
   const sweeps = {};
-  await Promise.all(Object.entries(index.sweeps).map(async ([id, { file, x, y, z, bearing0 }]) => {
+  await Promise.all(Object.entries(index.sweeps).map(async ([id, { file, x, y, z, bearing0, lean, flat }]) => {
     const bytes = await readFile(join(folder, file));
     const depth = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-    sweeps[id] = { depth, width: index.width, height: index.height, x, y, z, bearing0 };
+    sweeps[id] = { depth, width: index.width, height: index.height, x, y, z, bearing0, lean: lean ?? null, flat: Boolean(flat) };
     cubeOf(sweeps[id]);                                           // now, so the first step of a walk does not stall
   }));
-  return { width: index.width, height: index.height, sweeps };
+  return { width: index.width, height: index.height, reach: index.reach ?? null, sweeps };
 }
 
 // ---- the room around a sweep, in a form that is quick to ask -----------------------------------------------------------
@@ -181,7 +189,8 @@ export const gridSize = (width, height, step) => [Math.ceil(width / step) + 1, M
  * Where each pixel of a camera frame lands in a sweep's panorama when the camera is NOT at the sweep's position.
  * @param {object} sweep   one entry of loadDepth().sweeps
  * @param {object} camera  { x, y, z (world metres), yaw (degrees, in THIS sweep's panorama yaw convention:
- *                         bearing0 minus the world bearing it faces), pitch, roll (degrees), fov (vertical, degrees) }
+ *                         bearing0 minus the world bearing it faces), pitch, roll (degrees), fov (vertical, degrees),
+ *                         lean (optional, from leanBetween(): how the camera itself stands off level) }
  * @param {number} width   frame size in pixels
  * @param {number} height
  * @param {number} step    grid spacing in pixels (e.g. 8)
@@ -215,8 +224,27 @@ export function warpGrid(sweep, camera, width, height, step, out, trust) {
   const sinY = Math.sin(yaw), cosY = Math.cos(yaw), sinP = Math.sin(pitch), cosP = Math.cos(pitch);
   const sinR = Math.sin(roll), cosR = Math.cos(roll);
   // The camera's place in the panorama's own frame, from the sweep.
-  const east = camera.x - sweep.x, north = camera.y - sweep.y, sinB = Math.sin(sweep.bearing0 * DEG), cosB = Math.cos(sweep.bearing0 * DEG);
-  const ox = sinB * east - cosB * north, oy = camera.z - sweep.z, oz = cosB * east + sinB * north;
+  const east = camera.x - sweep.x, north = camera.y - sweep.y, rise = camera.z - sweep.z;
+  const sinB = Math.sin(sweep.bearing0 * DEG), cosB = Math.cos(sweep.bearing0 * DEG);
+  let ox = sinB * east - cosB * north, oy = rise, oz = cosB * east + sinB * north, tip = null;
+  if (sweep.lean || camera.lean) {
+    // The tripod leaned: the panorama's frame is the level one above, tipped. `own` takes a world direction into it.
+    const s = sweep.lean ?? LEVEL, c = camera.lean ?? s;
+    const own = [sinB * s[0] - cosB * s[1], sinB * s[3] - cosB * s[4], sinB * s[6] - cosB * s[7],
+      s[2], s[5], s[8], cosB * s[0] + sinB * s[1], cosB * s[3] + sinB * s[4], cosB * s[6] + sinB * s[7]];
+    ox = own[0] * east + own[1] * north + own[2] * rise; oy = own[3] * east + own[4] * north + own[5] * rise; oz = own[6] * east + own[7] * north + own[8] * rise;
+    // And `tip` takes a camera ray, worked out as if the tripod had stood level, into it: nothing at all when
+    // the camera leans as the tripod did, which it does at the sweep's own position.
+    if (c !== s) {
+      tip = new Float64Array(9);
+      for (let row = 0; row < 3; row++) {
+        const a = own[3 * row] * c[0] + own[3 * row + 1] * c[3] + own[3 * row + 2] * c[6];
+        const b = own[3 * row] * c[1] + own[3 * row + 1] * c[4] + own[3 * row + 2] * c[7];
+        const d = own[3 * row] * c[2] + own[3 * row + 1] * c[5] + own[3 * row + 2] * c[8];
+        tip[3 * row] = a * sinB - b * cosB; tip[3 * row + 1] = d; tip[3 * row + 2] = a * cosB + b * sinB;
+      }
+    }
+  }
   const away2 = ox * ox + oy * oy + oz * oz, moved = away2 > 1e-8;
   const clear2 = clear * clear, reach2 = reach * reach;
 
@@ -233,6 +261,10 @@ export function warpGrid(sweep, camera, width, height, step, out, trust) {
         const up = ny * cosP + sinP, forward = cosP - ny * sinP;
         let x = nx * cosY + forward * sinY, y = up, z = forward * cosY - nx * sinY;     // the ray, in the panorama's frame
         let met = true, reached = 0;
+        if (tip) {
+          const a = x, b = y;
+          x = tip[0] * a + tip[1] * b + tip[2] * z; y = tip[3] * a + tip[4] * b + tip[5] * z; z = tip[6] * a + tip[7] * b + tip[8] * z;
+        }
 
         if (moved) {
           const length = 1 / Math.sqrt(x * x + y * y + z * z);
@@ -338,6 +370,19 @@ export function warpGrid(sweep, camera, width, height, step, out, trust) {
 // For each vertex of the grid being made: the cosine of its panorama pitch (-1 if its ray met nothing), and how far
 // from the camera its ray met the room.
 let level = new Float32Array(0), far = new Float32Array(0);
+const LEVEL = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+/**
+ * How the camera stands off level `progress` of the way from sweep A to sweep B: as A's tripod did at A, as B's
+ * did at B, and in between in between. Pass it as camera.lean to both warpGrid() calls of a frame, so the two
+ * panoramas agree about which way is up all along the walk and each is still the plain view at its own position.
+ * Null when neither tripod leaned (the A5), which is the same as leaving it out.
+ */
+export function leanBetween(A, B, progress) {
+  if (!A.lean && !B.lean) return null;
+  const a = A.lean ?? LEVEL, b = B.lean ?? LEVEL, p = Math.min(Math.max(progress, 0), 1);
+  return p <= 0 ? a : p >= 1 ? b : a.map((value, n) => value + (b[n] - value) * p);
+}
 
 // The panorama is trusted where neighbouring vertices are about as far apart in it as they are in the frame. Under
 // SHARP of that it is being magnified, and under SMEAR it is a smear: the photo pulled out over what the sweep

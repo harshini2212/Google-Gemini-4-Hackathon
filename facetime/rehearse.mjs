@@ -1,7 +1,7 @@
 // A rehearsal call without a phone: joins a LiveKit room as the caller, speaks the demo questions with the Mac's
 // voice, and saves what the caller would see and hear. It uses no Chert minutes. The agent must be running (npm start).
 //   node --env-file=.env.local rehearse.mjs <output folder> ["question" ...]
-// Saves call.mp4 (the whole call with both voices, when ffmpeg is installed), a frame after each answer,
+// Saves call.mp4 (the whole call with both voices, when ffmpeg is installed; REHEARSE_FILM=0 skips it), a frame after each answer,
 // guide.wav, and prints a transcript of the guide.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -112,7 +112,7 @@ else log('first video frame arrived');
 
 // The recording: the picture as it stood at each fifteenth of a second, encoded as it goes.
 // The first ffmpeg that actually runs here (a Mac can have one built for the other processor ahead of it on the PATH).
-const ffmpeg = [process.env.FFMPEG, '/opt/homebrew/bin/ffmpeg', 'ffmpeg'].find(bin => bin && spawnSync(bin, ['-version']).status === 0);
+const ffmpeg = process.env.REHEARSE_FILM === '0' ? null : [process.env.FFMPEG, '/opt/homebrew/bin/ffmpeg', 'ffmpeg'].find(bin => bin && spawnSync(bin, ['-version']).status === 0);
 let film = null, filmTimer = null;
 if (latest && ffmpeg) {
   const first = picture();

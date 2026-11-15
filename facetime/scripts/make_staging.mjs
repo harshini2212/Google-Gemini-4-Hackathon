@@ -13,7 +13,6 @@ import { loadPresets, renderView, stagePano } from '../stage.mjs';
 const here = (relative) => fileURLToPath(new URL(relative, import.meta.url));
 
 // Where each property keeps its panoramas (<stop>.webp and tour.json) and its staged results, and what to make.
-// `like` names an earlier preset of the same room seen from another spot, whose furniture this one should repeat.
 const PROPERTIES = {
   a5: {
     panos: here('../../data/demo/'), staged: here('../media/staged/'),
@@ -32,7 +31,8 @@ const PROPERTIES = {
       { stop: 'primary_bedroom', id: 'bedroom', label: 'Furnished primary bedroom', request: 'Furnish this as the primary bedroom: a king bed with a dark wood headboard against the far wall, a nightstand with a lamp on each side, and a bench at the foot of the bed. Leave the window completely clear' },
       { stop: 'dining_area', id: 'dining', label: 'Dining set', request: 'Add a wooden dining table for six with six chairs, centred under the chandelier, and a low sideboard against the far wall if it fits without blocking the door' },
       { stop: 'bedroom_2', id: 'office', label: 'Home office', request: 'Furnish this as a home office: a wooden desk with a monitor, an office chair and a tall dark bookshelf against a wall. Leave the window clear' },
-      { stop: 'living_room', id: 'modern', label: 'Modern living room', like: { stop: 'living_room_front', id: 'modern' }, request: 'Furnish this living room in the same simple modern style: the grey three-seat sofa, the wooden coffee table, the large rug, the floor lamp and the tall plant' },
+      // The same room from its middle. The furniture is described piece by piece to repeat living_room_front's look.
+      { stop: 'living_room', id: 'modern', label: 'Modern living room', request: 'Furnish this living room in a simple modern style, as one seating group against this wall between the two windows: a grey fabric three-seat sofa with square arms and short wooden legs, a low walnut coffee table with two books and a small bowl on it, a large light grey rug, a slim brass floor lamp with a white drum shade, and a tall leafy plant in a white pot. Leave both windows clear' },
     ],
   },
 };
@@ -70,20 +70,13 @@ if (attempt) {
   const make = async (p) => {
     try {
       const { yaw, pitch } = tour.stops[p.stop];
-      let like;
-      if (p.like) {
-        const model = index[p.like.stop]?.find((e) => e.id === p.like.id);
-        if (!model) throw new Error(`make ${p.like.stop}:${p.like.id} first`);
-        like = { file: path.join(property.staged, model.file), yaw: model.yaw, pitch: model.pitch };
-      }
-      const result = await stagePano({ source: path.join(property.panos, `${p.stop}.webp`), yaw, pitch, request: p.request, name: `${p.stop}-${p.id}`, outDir: property.staged, like });
+      const result = await stagePano({ source: path.join(property.panos, `${p.stop}.webp`), yaw, pitch, request: p.request, name: `${p.stop}-${p.id}`, outDir: property.staged });
       console.log(`${p.stop}:${p.id}  ${result.cached ? 'cached' : `${result.seconds} s`}  ${result.file}`);
       await preview(result.file, yaw, pitch, `${p.stop}-${p.id}`);
       index[p.stop] = [...(index[p.stop] || []).filter((e) => e.id !== p.id), { id: p.id, label: p.label, request: p.request, file: path.basename(result.file), yaw, pitch }];
     } catch (error) { console.error(`${p.stop}:${p.id} failed: ${error.message}`); process.exitCode = 1; }
   };
-  await Promise.all(wanted.filter((p) => !p.like).map(make));
-  for (const p of wanted.filter((p) => p.like)) await make(p);   // these copy the furniture of one made above
+  await Promise.all(wanted.map(make));
   const ordered = {};
   for (const p of property.presets) {
     const entry = index[p.stop]?.find((e) => e.id === p.id);

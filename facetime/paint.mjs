@@ -6,8 +6,9 @@ import sharp from 'sharp';
 const legacyWalls = new URL('./media/walls/', import.meta.url);
 
 /**
- * The paintable wall of each stop, from index.json in `folder` (default media/walls): { [stop]: { file, label } }.
- * Returns { [stop]: { label, mask, width, height } } where mask is one byte per panorama pixel (255 = wall).
+ * The paintable wall of each stop, from index.json in `folder` (default media/walls):
+ * { [stop]: { file, label, yaw?, pitch?, level? } } (which way to face it, and how bright the bare wall is).
+ * Returns { [stop]: { label, yaw, pitch, level, mask, width, height } }; mask is one byte per panorama pixel (255 = wall).
  * A stop without a mask is absent; with no index at all the result is empty.
  */
 export async function loadWalls(folder) {
@@ -16,9 +17,9 @@ export async function loadWalls(folder) {
   try { index = JSON.parse(await readFile(new URL('index.json', wallsDir), 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
   const walls = {};
-  for (const [stop, { file, label }] of Object.entries(index)) {
+  for (const [stop, { file, ...about }] of Object.entries(index)) {
     const { data, info } = await sharp(await readFile(new URL(file, wallsDir))).extractChannel(0).raw().toBuffer({ resolveWithObject: true });
-    walls[stop] = { label, mask: new Uint8Array(data), width: info.width, height: info.height };
+    walls[stop] = { ...about, mask: new Uint8Array(data), width: info.width, height: info.height };
   }
   return walls;
 }
@@ -40,10 +41,16 @@ const KNEE = 0.7;                        // above this the paint rolls off towar
  * @param {Uint32Array} source RGBA pixels, one little-endian Uint32 each (red in the low byte)
  * @param {Uint8Array} mask one byte per pixel, 0 = leave alone, 255 = fully painted
  * @param {[number, number, number]} rgb the paint colour, 0 to 255 per channel
+ * @param {number} [level] how bright (0 to 255) the wall is where the paint should show at exactly `rgb`: the
+ *   `level` of the wall in its index.json. Without one the wall is taken for the A5's mid grey (160). A white
+ *   wall has 237, white in full light: it is far brighter than the grey, and without this red comes out washed
+ *   out and glowing. With it red is as dark against the white as real paint, and warm white leaves the wall as
+ *   bright as it was.
  */
-export function tintPano(source, mask, [red, green, blue]) {
+export function tintPano(source, mask, [red, green, blue], level) {
   const out = new Uint32Array(source);
-  const paint = (value) => (toLinear[value] * (1 - SHEEN) + SHEEN) / GRAY;
+  const gray = level > 0 ? toLinear[Math.min(255, Math.round(level))] : GRAY;
+  const paint = (value) => (toLinear[value] * (1 - SHEEN) + SHEEN) / gray;
   const tr = paint(red), tg = paint(green), tb = paint(blue);
   const peak = Math.max(tr, tg, tb), room = 1 - KNEE;
   for (let i = 0; i < source.length; i++) {

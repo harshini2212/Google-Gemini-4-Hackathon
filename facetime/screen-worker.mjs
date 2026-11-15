@@ -2,34 +2,70 @@
 // One frame is WIDTH x HEIGHT RGBA. The picture follows the shared tour view (shared/tour.mjs):
 //   interior  a phone camera held by a person standing at a scan position: it drifts, shakes a little, turns to
 //             what `view.look` points at, and walks through the scan positions to the next place
-//   site      the Vexcel aerial with the scan location and the parking row marked
+//   site      the aerial with the property marked and, where the bundle gives one, a second spot such as the parking
 //   plan      the floor plan measured from the Matterport scan
 // Beyond the shared view it honours, all optional:
 //   view.place    { sweep, yaw, pitch, label, detail }  where to stand, instead of tour.stops[view.stop]
 //   view.look     { yaw, pitch, zoom }                   yaw relative to the place's yaw, pitch absolute, zoom 1 to 2.5
-//   view.paints   { [stop]: { rgb, label } }             the stop's wall (media/walls) painted this colour
+//   view.paints   { [stop]: { rgb, label } }             the stop's wall (the bundle's walls/) painted this colour
 //   view.sources  { [sweepId]: { file, label } }         another panorama (a staged room) in place of the scan
 //   view.spin     { id, arc: 'full' | [from, to], seconds }   one slow turn to show the whole room, once per id
+//
+// Everything about a property comes from one folder, its bundle (`mediaDir`):
+//   tour.json          { property: { name, address, caption }, stops: { [key]: { label, detail, sweep, yaw, pitch } },
+//                        rooms: [{ id, type, area_sqft, polygon }], sweeps: [{ id, x, y, neighbors, yawOffset }],
+//                        site: { image, size, anchor, anchorLabel, parking?, parkingLabel?, title, detail, source },
+//                        plan: { title, detail, source } }
+//   <stop key>.webp    the stop's panorama, equirectangular, 2 : 1
+//   walk.json          optional (scripts/prepare_walk.py): the sweeps a person can walk between, in place of tour.sweeps,
+//                      and panoramas of sweeps that are not stops
+//   walls/             optional: index.json and the wall masks for view.paints
+//   <stop>-<finish>.webp   optional: the stop repainted, for view.finish
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { access, open, readFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parentPort, workerData } from 'node:worker_threads';
 import sharp from 'sharp';
 import { finishes } from '../shared/tour.mjs';
 import { loadWalls, tintPano } from './paint.mjs';
 
-const { width: W, height: H, fps, mediaDir } = workerData;
+const { width: W, height: H, fps } = workerData;
 const N = W * H;
 const S = W / 1280;                       // every size below is drawn for 1280 x 720 and scaled
 const DEG = Math.PI / 180, TAU = 2 * Math.PI;
 const TAN = Math.tan(30 * DEG);           // half of the 60 degree vertical field of view, the same as the posters
 const here = dirname(fileURLToPath(import.meta.url));
+const mediaDir = resolve(workerData.mediaDir);
 const tour = JSON.parse(await readFile(join(mediaDir, 'tour.json'), 'utf8'));
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
 const number = (value, otherwise) => Number.isFinite(value) ? value : otherwise;
 const report = error => parentPort.postMessage({ type: 'error', message: String(error?.stack ?? error) });
+const exists = file => access(file).then(() => true, () => false);
+
+// The first bundle, the A5 in data/demo, was made before a bundle could say what its captions read, and its walk
+// and wall masks are in media/ beside this file. What it leaves unsaid is kept here; any other bundle speaks for itself.
+const legacy = mediaDir === resolve(here, '../data/demo');
+const { property = {}, floor = {}, site = {} } = tour;
+const unsaid = legacy ? {
+  caption: 'The Parker at Ellington · A5 · 1 bed 1 bath',
+  site: {
+    anchorLabel: 'A5 · scanned unit', parkingLabel: `Parking row · about ${site.distanceFt} ft`, title: 'Parking and arrival',
+    detail: `${property.parking_spaces} spaces community-wide${property.covered_parking ? ' · covered parking on site' : ''}`,
+    source: 'Vexcel aerial · CoStar record · Matterport geolocation',
+  },
+  plan: {
+    title: 'Floor plan', detail: `${floor.minSquareFeet} sq ft listed · ${Math.round(floor.scanAreaSqft)} sq ft measured indoors`,
+    source: 'Matterport scan · CoStar A5 listing',
+  },
+} : {
+  caption: property.name ?? '',
+  site: { anchorLabel: property.name ?? 'The property', parkingLabel: 'Parking', title: property.name ?? 'From above', detail: property.address ?? '', source: 'Aerial' },
+  plan: { title: 'Floor plan', detail: '', source: 'Matterport scan' },
+};
+const header = String(property.caption ?? unsaid.caption);
+const siteWords = { ...unsaid.site, ...site }, planWords = { ...unsaid.plan, ...tour.plan };
 
 // ---- images ---------------------------------------------------------------------------------------------------------
 
@@ -64,7 +100,7 @@ function decode(file, widest = 0) {
         bytes = new Uint8Array(head.readUInt32LE(0) * head.readUInt32LE(4) * 4);
         chunk = head.subarray(8);
       }
-      bytes.set(chunk.subarray(0, bytes.length - filled), filled);
+      if (filled < bytes.length) bytes.set(chunk.subarray(0, bytes.length - filled), filled);
       filled += chunk.length;
     });
     child.stderr.on('data', text => { complaint += text; });
@@ -88,19 +124,24 @@ const svg = body => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="
 const SANS = 'font-family="Helvetica Neue, Helvetica, Arial, sans-serif"';
 const SERIF = 'font-family="Georgia, Times New Roman, serif"';
 
-/** The lower third: where we are, what it is, and which data layer the picture comes from. */
+/** About how wide a line of the sans face is, as a multiple of its font size: there is nothing here to measure text with. */
+const NARROW = new Set(" ·.,:;'|!()-iltfrjI");
+const span = text => [...String(text)].reduce((sum, letter) => sum + (NARROW.has(letter) ? 0.295 : 0.5665), 0);
+
+/** The lower third: where we are, what it is, and which data layer the picture comes from. Above, which property this is. */
 function caption({ title = '', detail = '', source = '', chip }) {
   const swatch = chip?.color ? 28 : 0;      // a chip without a colour is words only
   const chipWidth = chip ? 36 + swatch + chip.label.length * 11.5 : 0;
+  const pill = Math.min(Math.round(93 + 19 * span(header) + 0.4 * header.length), 1200);
   return `
     <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.72"/>
     </linearGradient></defs>
     <rect x="0" y="470" width="1280" height="250" fill="url(#shade)"/>
     <g ${SANS} text-anchor="middle">
-      <rect x="${640 - 235}" y="26" width="470" height="40" rx="20" fill="#0d1413" fill-opacity="0.62"/>
-      <circle cx="${640 - 207}" cy="46" r="6" fill="#ff5a4e"/>
-      <text x="648" y="53" font-size="19" font-weight="500" fill="#fff" letter-spacing="0.4">The Parker at Ellington · A5 · 1 bed 1 bath</text>
+      ${header ? `<rect x="${640 - pill / 2}" y="26" width="${pill}" height="40" rx="20" fill="#0d1413" fill-opacity="0.62"/>
+      <circle cx="${640 - pill / 2 + 28}" cy="46" r="6" fill="#ff5a4e"/>
+      <text x="648" y="53" font-size="19" font-weight="500" fill="#fff" letter-spacing="0.4">${esc(header)}</text>` : ''}
       ${chip ? `<rect x="${640 - chipWidth / 2}" y="528" width="${chipWidth}" height="42" rx="21" fill="#fff" fill-opacity="0.94"/>
       ${swatch ? `<circle cx="${640 - chipWidth / 2 + 24}" cy="549" r="11" fill="${chip.color}" stroke="#0d1413" stroke-opacity="0.25"/>` : ''}
       <text x="${640 + swatch / 2}" y="556" font-size="20" font-weight="600" fill="#0d1413">${esc(chip.label)}</text>` : ''}
@@ -125,38 +166,41 @@ async function overlay(words) {
   return keep(overlays, key, { data, rows }, 5);
 }
 
-/** The aerial, enlarged to fill the frame, with the scan location, the parking row and the line between them. */
+/**
+ * The aerial, enlarged to fill the frame, with the property marked: `site.anchor`, a share of the picture's width
+ * and height. Where the bundle gives a second spot, `site.parking`, that is marked too, with a line between them.
+ */
 let sitePicture = null;
 const siteImage = () => sitePicture ??= drawSite();
 async function drawSite() {
-  const { site, property } = tour;
-  const scale = Math.max(W / site.size[0], H / site.size[1]);
-  const width = Math.round(site.size[0] * scale), height = Math.round(site.size[1] * scale);
-  const middle = (site.anchor[1] + site.parking[1]) / 2 * height;
-  const top = Math.round(Math.min(Math.max(middle - H * 0.45, 0), height - H));
-  const left = Math.round((width - W) / 2);
-  const base = await sharp(join(mediaDir, 'site.webp')).resize(width, height, { kernel: 'lanczos3' })
+  const { size, anchor, parking } = site;
+  if (!size || !anchor) throw new Error('The bundle has no aerial: tour.json needs site.size and site.anchor');
+  const scale = Math.max(W / size[0], H / size[1]);
+  const width = Math.round(size[0] * scale), height = Math.round(size[1] * scale);
+  const centre = parking ? [(anchor[0] + parking[0]) / 2, (anchor[1] + parking[1]) / 2] : anchor;
+  const top = Math.round(clamp(centre[1] * height - H * 0.45, 0, height - H));
+  const left = Math.round(clamp(centre[0] * width - W / 2, 0, width - W));
+  const base = await sharp(join(mediaDir, basename(site.image ?? 'site.webp'))).resize(width, height, { kernel: 'lanczos3' })
     .extract({ left, top, width: W, height: H }).toBuffer();
   const point = ([x, y]) => [(x * width - left) / S, (y * height - top) / S];
-  const [ax, ay] = point(site.anchor), [px, py] = point(site.parking);
-  const covered = property.covered_parking ? ' · covered parking on site' : '';
+  const [ax, ay] = point(anchor), [px, py] = parking ? point(parking) : [ax, ay];
+  // A label is a box that ends `right` of its spot, above or below it, and stays inside the picture.
+  const label = (words, x, y, right, pad) => {
+    const wide = Math.round(44 + 20 * span(words)), from = clamp(x + right - wide, 16, 1264 - wide);
+    return `<rect x="${from}" y="${y}" width="${wide}" height="38" rx="19" fill="#0d1413" fill-opacity="0.82"/>
+        <text x="${from + wide - pad}" y="${y + 26}" font-size="20" font-weight="600" fill="#fff">${esc(words)}</text>`;
+  };
   const marks = `
     <g ${SANS}>
-      <line x1="${ax}" y1="${ay}" x2="${px}" y2="${py}" stroke="#fff" stroke-width="4" stroke-dasharray="3 9" stroke-linecap="round"/>
+      ${parking ? `<line x1="${ax}" y1="${ay}" x2="${px}" y2="${py}" stroke="#fff" stroke-width="4" stroke-dasharray="3 9" stroke-linecap="round"/>` : ''}
       <circle cx="${ax}" cy="${ay}" r="26" fill="#ff5a4e" fill-opacity="0.25"/>
       <circle cx="${ax}" cy="${ay}" r="11" fill="#ff5a4e" stroke="#fff" stroke-width="4"/>
-      <circle cx="${px}" cy="${py}" r="11" fill="#2f6bff" stroke="#fff" stroke-width="4"/>
-      <g text-anchor="end"><rect x="${ax - 222}" y="${ay - 64}" width="204" height="38" rx="19" fill="#0d1413" fill-opacity="0.82"/>
-        <text x="${ax - 40}" y="${ay - 38}" font-size="20" font-weight="600" fill="#fff">A5 · scanned unit</text></g>
-      <g text-anchor="end"><rect x="${px - 240}" y="${py + 24}" width="262" height="38" rx="19" fill="#0d1413" fill-opacity="0.82"/>
-        <text x="${px + 2}" y="${py + 50}" font-size="20" font-weight="600" fill="#fff">Parking row · about ${site.distanceFt} ft</text></g>
+      ${parking ? `<circle cx="${px}" cy="${py}" r="11" fill="#2f6bff" stroke="#fff" stroke-width="4"/>` : ''}
+      <g text-anchor="end">${label(siteWords.anchorLabel, ax, ay - 64, -18, 22)}</g>
+      ${parking ? `<g text-anchor="end">${label(siteWords.parkingLabel, px, py + 24, 22, 20)}</g>` : ''}
     </g>`;
   const image = await pixels(await sharp(base).composite([{ input: svg(marks) }]).toBuffer());
-  const layer = await overlay({
-    title: 'Parking and arrival',
-    detail: `${property.parking_spaces} spaces community-wide${covered}`,
-    source: 'Vexcel aerial · CoStar record · Matterport geolocation',
-  });
+  const layer = await overlay({ title: siteWords.title, detail: siteWords.detail, source: siteWords.source });
   return { ...image, layer, focus: [(ax + px) / 2 * S, (ay + py) / 2 * S] };
 }
 
@@ -171,7 +215,8 @@ function inside([x, y], polygon) {
 
 /** The floor plan from the scan's room boundaries, with the room and spot the camera stands in and the planned route marked. */
 async function planImage(view, place) {
-  const rooms = tour.rooms;
+  const rooms = tour.rooms ?? [];
+  if (!rooms.length) throw new Error('The bundle has no floor plan: tour.json needs rooms');
   const all = rooms.flatMap(room => room.polygon);
   const minX = Math.min(...all.map(p => p[0])), maxX = Math.max(...all.map(p => p[0]));
   const minY = Math.min(...all.map(p => p[1])), maxY = Math.max(...all.map(p => p[1]));
@@ -179,7 +224,7 @@ async function planImage(view, place) {
   const ox = 640 - (maxX + minX) / 2 * scale, oy = 322 + (maxY + minY) / 2 * scale;
   const at = ([x, y]) => [ox + x * scale, oy - y * scale];
   const here = place.roomId ?? rooms.find(room => inside([place.sweep.x, place.sweep.y], room.polygon))?.id;
-  const marks = new Map(tour.sweeps.map(sweep => [sweep.id, at([sweep.x, sweep.y])]));
+  const marks = new Map([...sweeps.values()].map(sweep => [sweep.id, at([sweep.x, sweep.y])]));
   const shapes = rooms.map(room => {
     const points = room.polygon.map(at);
     const cx = (Math.min(...points.map(p => p[0])) + Math.max(...points.map(p => p[0]))) / 2;
@@ -195,35 +240,103 @@ async function planImage(view, place) {
     .map(p => p.map(v => v.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="#ff5a4e" stroke-width="6"
     stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 13"/>`).join('');
   const stop = marks.get(place.sweep.id);
-  const { floor } = tour;
   return pixels(svg(`<rect width="1280" height="720" fill="#18211f"/>
     <g ${SANS} text-anchor="middle">${shapes}${route}
       ${stop ? `<circle cx="${stop[0]}" cy="${stop[1]}" r="20" fill="#ff5a4e" fill-opacity="0.25"/>
       <circle cx="${stop[0]}" cy="${stop[1]}" r="9" fill="#ff5a4e" stroke="#fff" stroke-width="3"/>` : ''}
-    </g>` + caption({
-    title: 'Floor plan',
-    detail: `${floor.minSquareFeet} sq ft listed · ${Math.round(floor.scanAreaSqft)} sq ft measured indoors`,
-    source: 'Matterport scan · CoStar A5 listing',
-  })));
+    </g>` + caption({ title: planWords.title, detail: planWords.detail, source: planWords.source })));
 }
 
 // ---- the scan positions ---------------------------------------------------------------------------------------------
 
-// media/walk.json (scripts/prepare_walk.py) has every scan position, the ones a person can walk between, and
-// which way each panorama faces: world direction `a` (degrees, atan2 in model x, y) is at panorama yaw `offset - a`.
-// Without it only the tour stops can be stood in, and a walk between them does not turn to face the way it goes.
-const walkFile = await readFile(join(here, 'media/walk.json'), 'utf8').then(JSON.parse, () => null);
-const aligned = Boolean(walkFile);
+// Every scan position, the ones a person can walk between, and which way each panorama faces: world direction `a`
+// (degrees, atan2 in model x, y) is at panorama yaw `yawOffset - a`. A walk.json (scripts/prepare_walk.py) says all
+// of it: the bundle's own or, for the first bundle, the one in media/. Without one it is the tour's sweeps as the
+// scan gives them. Where those have no yawOffset, a walk does not turn to face the way it goes.
+const json = file => readFile(file, 'utf8').then(JSON.parse, () => null);
+let walkDir = mediaDir, walkFile = await json(join(mediaDir, 'walk.json'));
+if (!walkFile && legacy) { walkDir = join(here, 'media'); walkFile = await json(join(walkDir, 'walk.json')); }
+const scanned = walkFile?.sweeps ?? tour.sweeps;
+if (!tour.stops || !Array.isArray(scanned)) throw new Error(`${join(mediaDir, 'tour.json')} needs stops and sweeps`);
+const aligned = scanned.every(sweep => Number.isFinite(sweep.yawOffset));
 const stopAt = new Map(Object.entries(tour.stops).map(([key, stop]) => [stop.sweep, key]));
-const sweeps = new Map((walkFile?.sweeps ?? tour.sweeps).map(sweep => [sweep.id, {
-  ...sweep, offset: sweep.yawOffset ?? 0, stop: stopAt.get(sweep.id) ?? null, source: null,
-  file: stopAt.has(sweep.id) ? join(mediaDir, `${stopAt.get(sweep.id)}.webp`) : sweep.pano ? join(here, 'media', sweep.pano) : null,
+const sweeps = new Map(scanned.map(sweep => [sweep.id, {
+  ...sweep, neighbors: [...sweep.neighbors ?? []], offset: sweep.yawOffset ?? 0, stop: stopAt.get(sweep.id) ?? null, bytes: 0,
+  file: stopAt.has(sweep.id) ? join(mediaDir, `${stopAt.get(sweep.id)}.webp`) : sweep.pano ? join(walkDir, sweep.pano) : null,
 }]));
+// The scan lists what can be seen from where. A way that can be walked can be walked back.
+if (!walkFile) for (const sweep of sweeps.values()) for (const id of sweep.neighbors) {
+  const other = sweeps.get(id);
+  if (other && !other.neighbors.includes(sweep.id)) other.neighbors.push(sweep.id);
+}
 
-const panos = new Map();
-function pano(file) {
-  if (!panos.has(file)) panos.set(file, decode(file).then(image => ({ ...image, key: file })));
-  return panos.get(file);
+/** A WebP picture's width and height, from its first bytes: asking libvips would cost this process memory it keeps. */
+async function sizeOf(file) {
+  const handle = await open(file);
+  try {
+    const { buffer: head } = await handle.read(Buffer.alloc(30), 0, 30, 0), kind = head.toString('latin1', 12, 16);
+    if (kind === 'VP8X') return [1 + head.readUIntLE(24, 3), 1 + head.readUIntLE(27, 3)];
+    if (kind === 'VP8 ') return [head.readUInt16LE(26) & 0x3fff, head.readUInt16LE(28) & 0x3fff];
+    if (kind === 'VP8L') return [1 + (head.readUInt32LE(21) & 0x3fff), 1 + ((head.readUInt32LE(21) >>> 14) & 0x3fff)];
+    throw new Error('not a WebP picture');
+  } finally { await handle.close(); }
+}
+
+// A sweep can be stood in when its panorama is there. One is 17 to 30 MB in memory, and its file says how much.
+const WIDEST = 3840;
+await Promise.all([...sweeps.values()].filter(sweep => sweep.file).map(async sweep => {
+  try {
+    const [width, height] = await sizeOf(sweep.file), shrink = Math.min(1, WIDEST / width);
+    sweep.bytes = Math.round(width * shrink) * Math.round(height * shrink) * 4;
+  } catch (error) {
+    report(`Cannot read the panorama ${sweep.file}: ${error?.message ?? error}`);
+    sweep.file = null;
+  }
+}));
+
+// The panoramas of a small unit all stay in memory. Of a house, the ones last stood in or walked past do, and
+// always those around the camera, so that a walk does not wait on a file.
+const ROOM = 330e6;                        // bytes of scan panoramas to keep
+const scans = new Map();                   // sweep id -> a promise of its panorama, the one last asked for last
+function scan(sweep) {
+  let held = scans.get(sweep.id);
+  if (!held) {
+    held = decode(sweep.file, WIDEST).then(image => ({ ...image, key: sweep.file }));
+    held.catch(() => { if (scans.get(sweep.id) === held) scans.delete(sweep.id); });    // so that the next time tries again
+  }
+  scans.delete(sweep.id);
+  scans.set(sweep.id, held);
+  return held;
+}
+
+/** Have these sweeps' panoramas in memory, three at a time: each is decoded in a process of its own. */
+async function load(ids) {
+  for (let i = 0; i < ids.length; i += 3) await Promise.all(ids.slice(i, i + 3).map(id => scan(sweeps.get(id))));
+}
+
+/**
+ * Let go of the panoramas longest unused, beyond what fits once those `coming` are in memory too. None on the walk
+ * under way, next to the camera or coming is let go of.
+ */
+function tidy(coming = []) {
+  let bytes = 0;
+  for (const id of new Set([...scans.keys(), ...coming])) bytes += sweeps.get(id).bytes;
+  if (bytes <= ROOM) return;
+  const spot = walk ? walk.to.place.sweep : stand?.sweep;
+  const near = new Set(spot ? [spot.id, ...spot.neighbors, ...coming] : coming);
+  for (const hop of walk?.hops ?? []) near.add(hop.from.id).add(hop.to.id);
+  for (const id of scans.keys()) {
+    if (near.has(id)) continue;
+    scans.delete(id);
+    if ((bytes -= sweeps.get(id).bytes) <= ROOM) break;
+  }
+}
+
+/** Have the panoramas around a sweep in memory before they are asked for. */
+function warm(sweep) {
+  const around = sweep.neighbors.filter(id => sweeps.get(id)?.file);
+  tidy(around);
+  load(around).catch(() => {});
 }
 
 /** The sweeps to walk through from one to another. A long step costs more than its length, so the walk takes the rooms in between. */
@@ -242,7 +355,7 @@ function route(from, to) {
     const a = sweeps.get(near);
     for (const id of a.neighbors) {
       const b = sweeps.get(id);
-      if (!b?.source || !open.has(id)) continue;
+      if (!b?.file || !open.has(id)) continue;
       const length = Math.hypot(a.x - b.x, a.y - b.y), next = cost.get(near) + length + length * length / 4;
       if (next < (cost.get(id) ?? Infinity)) { cost.set(id, next); back.set(id, near); }
     }
@@ -253,15 +366,21 @@ function route(from, to) {
 const bearing = (a, b) => Math.atan2(b.y - a.y, b.x - a.x) / DEG;
 const turn = angle => ((angle % 360) + 540) % 360 - 180;             // the short way round, -180 to 180
 
-/** At most five steps: on a longer way, pass by the positions where the walk turns least. */
+const LONG = 5.1;                          // metres: the longest step taken at the usual pace
+
+/**
+ * Five steps where that can be done: on a longer way, pass by the positions where the walk turns least, but never so
+ * that a step becomes a long one. Across a house the way has more steps instead, and the walk takes longer.
+ */
 function shorten(path) {
   while (path.length > 6) {
-    let drop = 1, least = Infinity;
+    let drop = 0, least = Infinity;
     for (let i = 1; i < path.length - 1; i++) {
       const [a, b, c] = [path[i - 1], path[i], path[i + 1]].map(id => sweeps.get(id));
       const bend = Math.abs(turn(bearing(b, c) - bearing(a, b)));
-      if (bend < least) { least = bend; drop = i; }
+      if (bend < least && Math.hypot(c.x - a.x, c.y - a.y) <= LONG) { least = bend; drop = i; }
     }
+    if (!drop) break;
     path.splice(drop, 1);
   }
   return path;
@@ -269,7 +388,14 @@ function shorten(path) {
 
 // ---- what a place looks like: the scan, a staged room, a painted wall -----------------------------------------------
 
-const walls = await loadWalls().catch(error => { report(error); return {}; });
+// The wall masks are the bundle's own. The first bundle's are in media/walls, and fit its panoramas only.
+const wallsIn = await exists(join(mediaDir, 'walls/index.json')) ? [join(mediaDir, 'walls')] : legacy ? [] : null;
+const walls = wallsIn ? await loadWalls(...wallsIn).catch(error => { report(error); return {}; }) : {};
+// The stops the bundle has repainted pictures of, for view.finish: <stop>-<finish>.webp.
+const repainted = new Set();
+for (const stop of Object.keys(tour.stops)) for (const finish of Object.keys(finishes)) {
+  if (await exists(join(mediaDir, `${stop}-${finish}.webp`))) repainted.add(`${stop}-${finish}`);
+}
 const breath = () => new Promise(resolve => setImmediate(resolve));
 
 /** A picture that is on screen or on the way there, by its key, so that it is not loaded or painted a second time. */
@@ -312,7 +438,7 @@ async function painted(source, stop, rgb) {
     let since = performance.now();
     for (let y = mask.top; y < mask.bottom; y += 24) {
       const from = y * source.width, to = Math.min(y + 24, mask.bottom) * source.width;
-      data.set(tintPano(source.data.subarray(from, to), mask.data.subarray(from, to), rgb), from);
+      data.set(tintPano(source.data.subarray(from, to), mask.data.subarray(from, to), rgb, walls[stop].level), from);
       if (performance.now() - since > 6) { await breath(); since = performance.now(); }
     }
     return { data, width: source.width, height: source.height, key };
@@ -330,7 +456,7 @@ async function staged(file) {
 /** The picture and caption words for a sweep under this view: the scan, or its staged room, with the paint on top. */
 async function dress(view, id) {
   const sweep = sweeps.get(id);
-  let source = sweep.source, chip = null, credit = 'Matterport scan';
+  let source = await scan(sweep), chip = null, credit = 'Matterport scan';
   const staging = view.sources?.[id];
   const room = typeof staging?.file === 'string' ? await staged(staging.file) : null;
   if (staging && !room && stand?.sweep === sweep) return stand.dress;       // keep showing what was on screen
@@ -341,8 +467,8 @@ async function dress(view, id) {
   }
   const paint = sweep.stop && walls[sweep.stop] ? view.paints?.[sweep.stop] : null;
   const rgb = Array.isArray(paint?.rgb) && paint.rgb.length === 3 ? paint.rgb.map(value => clamp(Math.round(number(value, 0)), 0, 255)) : null;
-  const finish = !rgb && !room && sweep.stop === 'living' && Object.hasOwn(finishes, view.finish) && view.finish !== 'original' ? finishes[view.finish] : null;
-  const finished = finish ? await staged(join(mediaDir, `living-${view.finish}.webp`)) : null;
+  const finish = !rgb && !room && repainted.has(`${sweep.stop}-${view.finish}`) ? finishes[view.finish] : null;
+  const finished = finish ? await staged(join(mediaDir, `${sweep.stop}-${view.finish}.webp`)) : null;
   if (rgb) {
     source = await painted(source, sweep.stop, rgb);
     chip = { label: `Paint preview · ${paint.label ?? 'Custom'}`, color: `rgb(${rgb.join(',')})` };
@@ -355,17 +481,19 @@ async function dress(view, id) {
   return { source, chip, credit };
 }
 
-/** Where the view stands: its own place, or the tour stop. Null for a sweep there is no panorama of. */
+/** Where the view stands: its own place, or the tour stop, or the bundle's first stop. Null for a sweep there is no panorama of. */
 function placeOf(view) {
   const given = view.place;
   if (given) {
     const sweep = sweeps.get(given.sweep);
-    if (!sweep?.source) return null;
+    if (!sweep?.file) return null;
     return { sweep, yaw: number(given.yaw, 0), pitch: clamp(number(given.pitch, -5), -45, 45),
-      label: given.label ?? sweep.room ?? '', detail: given.detail ?? '' };
+      label: given.label ?? sweep.room ?? tour.stops[sweep.stop]?.label ?? '', detail: given.detail ?? '' };
   }
-  const stop = tour.stops[Object.hasOwn(tour.stops, view.stop) ? view.stop : 'living'];
-  return { sweep: sweeps.get(stop.sweep), yaw: stop.yaw, pitch: stop.pitch, label: stop.label, detail: stop.detail, roomId: stop.roomId };
+  const stop = tour.stops[Object.hasOwn(tour.stops, view.stop) ? view.stop : Object.keys(tour.stops)[0]];
+  const sweep = sweeps.get(stop?.sweep);
+  if (!sweep?.file) return null;
+  return { sweep, yaw: number(stop.yaw, 0), pitch: number(stop.pitch, -5), label: stop.label ?? '', detail: stop.detail ?? '', roomId: stop.roomId };
 }
 
 function lookOf(view, place) {
@@ -613,13 +741,15 @@ function turnRound(now) {
 /** The steps of a walk along a path of sweeps, each with the pictures at both ends and the way it faces. */
 function hopsAlong(path, first, looks) {
   return path.slice(1).map((id, index) => {
-    const from = sweeps.get(path[index]), to = sweeps.get(id);
+    const from = sweeps.get(path[index]), to = sweeps.get(id), length = Math.hypot(to.x - from.x, to.y - from.y);
     return {
       from, to, heading: bearing(from, to),
-      a: index === 0 ? first : { source: (looks.get(from.id) ?? from).source },
-      b: { source: (looks.get(id) ?? to).source },
+      a: index === 0 ? first : { source: looks.get(from.id).source },
+      b: { source: looks.get(id).source },
       // How far the picture pushes in over the step: more for a long step, so the far wall arrives.
-      push: clamp(1 + Math.hypot(to.x - from.x, to.y - from.y) / 2.6, 1.25, 1.8),
+      push: clamp(1 + length / 2.6, 1.25, 1.8),
+      // A long step, across a yard or down a drive, takes longer in proportion to its length.
+      slow: Math.max(1, length / LONG),
     };
   });
 }
@@ -651,7 +781,8 @@ function stride(dt, now) {
   const left = hops.length - walk.at, gain = walk.pace / 0.35;
   const want = Math.min(walk.pace * ahead, Math.sqrt(2 * gain * left));
   walk.speed += clamp(want - walk.speed, -1.5 * gain * dt, gain * dt);
-  walk.at += walk.speed * dt;
+  // No step takes much more than 1.6 s, however long it is.
+  walk.at += walk.speed * dt / Math.min(hops[index].slow, Math.max(1, 1.6 * walk.pace));
   if (hops.length - walk.at < 0.004) {
     stand = { sweep: walk.to.place.sweep, place: walk.to.place, layer: hops.at(-1).b, dress: walk.to.dress };
     if (!walk.titled) setCaption(walk.to.caption, now);
@@ -790,7 +921,7 @@ function cut(now) {
 
 async function show(view) {
   const place = placeOf(view);
-  if (!place) throw new Error(`No panorama for the sweep ${view.place?.sweep}`);
+  if (!place) throw new Error(view.place ? `No panorama for the sweep ${view.place.sweep}` : `No panorama for the stop ${view.stop}`);
   if (view.mode === 'site' || view.mode === 'plan') {
     const next = view.mode === 'site' ? { place: 'site', image: await siteImage(), push: 0.08 }
       : { place: `plan:${place.sweep.id}:${(view.route ?? []).join('>')}`, image: await planImage(view, place) };
@@ -805,16 +936,25 @@ async function show(view) {
 
   // Everything that takes time first, the pictures along the way and the caption, while the frames keep coming.
   const from = () => walk ? walk.hops[Math.min(Math.floor(walk.at), walk.hops.length - 1)].to : stand?.sweep;
+  const way = () => {
+    const path = !still && from() && from() !== place.sweep ? route(from().id, place.sweep.id) : null;
+    return path && shorten(path);
+  };
   const looks = new Map();
-  const way = !still && from() && from() !== place.sweep ? route(from().id, place.sweep.id) : null;
-  for (const id of new Set([place.sweep.id, ...(way ?? [])])) looks.set(id, await dress(view, id));
-  const dressed = looks.get(place.sweep.id);
-  const captionLayer = await overlay({ title: place.label, detail: place.detail, source: dressed.credit, chip: dressed.chip });
-  const blank = await overlay({});
+  let path = way(), dressed, captionLayer, blank;
+  do {
+    const ids = [...new Set([place.sweep.id, ...(path ?? [])])];
+    tidy(ids);
+    await load(ids);
+    for (const id of ids) if (!looks.has(id)) looks.set(id, await dress(view, id));
+    dressed = looks.get(place.sweep.id);
+    captionLayer = await overlay({ title: place.label, detail: place.detail, source: dressed.credit, chip: dressed.chip });
+    blank = await overlay({});
+    path = way();                             // a walk under way has moved on meanwhile: the way from where it is now
+  } while (path?.some(id => !looks.has(id)));
 
   const now = performance.now();
   const start = from();
-  const path = !still && start && start !== place.sweep ? route(start.id, place.sweep.id) : null;
   const pointing = lookOf(view, place), repointed = JSON.stringify(pointing) !== JSON.stringify(look);
   look = pointing;
   // Anything that moves the camera ends a turn round the room; new paint or furniture does not.
@@ -838,10 +978,10 @@ async function show(view) {
       // Already walking: finish the step under way, then go on from where it ends.
       const index = Math.min(Math.floor(walk.at), walk.hops.length - 1);
       walk.hops.length = index + 1;
-      walk.hops.push(...hopsAlong(shorten(path), walk.hops[index].b, looks));
+      walk.hops.push(...hopsAlong(path, walk.hops[index].b, looks));
       Object.assign(walk, { to, titled: false, pace: Math.max(walk.pace, paceFor(walk.hops.slice(index + 1), walk.hops[index].heading)) });
     } else {
-      const hops = hopsAlong(shorten(path), stand.layer, looks);
+      const hops = hopsAlong(path, stand.layer, looks);
       walk = { hops, at: 0, speed: 0, pace: paceFor(hops, eye.dir.b), to, titled: false };
     }
     setCaption(blank, now);
@@ -858,6 +998,7 @@ async function show(view) {
     stand = { ...stand, place, dress: dressed };
     setCaption(captionLayer, now);
   }
+  warm(place.sweep);
 }
 
 // ---- the loop --------------------------------------------------------------------------------------------------------
@@ -877,10 +1018,10 @@ parentPort.on('message', message => {
   if (message.type === 'pause' && timer) { clearInterval(timer); timer = null; }
 });
 
-// Load every picture before the first call, so no change on a call waits on a file.
-const files = [...sweeps.values()].filter(sweep => sweep.file);
-for (let i = 0; i < files.length; i += 3) {
-  await Promise.all(files.slice(i, i + 3).map(async sweep => { sweep.source = await pano(sweep.file); }));
-}
-await siteImage();
+// Have the pictures in memory before the first call, so that no change on a call waits on a file: every panorama
+// of a small unit; of a house as many as are kept, in the order the scan was walked, which starts at the way in.
+let total = 0;
+const first = [...sweeps.values()].filter(sweep => sweep.file && (total += sweep.bytes) <= ROOM).map(sweep => sweep.id);
+await load(first).catch(report);
+if (tour.site) await siteImage().catch(report);
 parentPort.postMessage({ type: 'ready' });

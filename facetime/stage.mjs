@@ -294,13 +294,13 @@ export function compose(pano, real, redrawn, yawDeg, pitchDeg) {
 
 // ---- the image service ------------------------------------------------------------------------------------------
 
-/** One paid call: the photo to edit (JPEG bytes, then any reference photos) and the instruction in, the edited photo's bytes out. */
-async function editPhoto(jpegs, prompt, timeoutMs) {
+/** One paid call: the photo (JPEG bytes) and the instruction in, the edited photo's bytes out. */
+async function editPhoto(jpeg, prompt, timeoutMs) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('Staging needs OPENAI_API_KEY in the environment');
   const body = {
     model: MODEL, prompt, n: 1, size: `${VIEW.width}x${VIEW.height}`, quality: QUALITY, output_format: 'jpeg', output_compression: 92,
-    images: jpegs.map((jpeg) => ({ image_url: `data:image/jpeg;base64,${jpeg.toString('base64')}` })),
+    images: [{ image_url: `data:image/jpeg;base64,${jpeg.toString('base64')}` }],
   };
   let response;
   try {
@@ -332,10 +332,6 @@ async function editPhoto(jpegs, prompt, timeoutMs) {
 
 const underway = new Map();                             // cache file -> promise, so a repeated request waits for the first
 
-const LIKE = ' The second image shows this same room from another spot, already furnished. Use the same furniture as in '
-  + 'the second image, with the same shapes, colours and materials, placed where those same pieces would really be seen '
-  + 'from this camera. Take only the furniture from the second image, never its walls, windows, floor or viewpoint.';
-
 /**
  * Edits what the camera faces at one standpoint and lays the result back onto the panorama.
  * @param {object} o
@@ -345,22 +341,21 @@ const LIKE = ' The second image shows this same room from another spot, already 
  * @param {string} o.request  what the caller asked for, in plain words
  * @param {string} o.name     short slug for the cache file
  * @param {string} [o.outDir] folder the result is written to and looked up in (default media/staged)
- * @param {{ file: string, yaw: number, pitch: number }} [o.like]  a staged panorama of the same room from another spot, and where to look in it: its furniture is the model for this one
  * @param {number} [o.timeoutMs]  how long to wait for the image service (default 90 s)
  * @returns {Promise<{ file: string, cached: boolean, seconds: number }>}  file = absolute path of the staged equirect panorama (webp, same size as source)
  */
-export async function stagePano({ source, yaw, pitch, request, name, outDir = stagedDir, like, timeoutMs = TIMEOUT_MS }) {
+export async function stagePano({ source, yaw, pitch, request, name, outDir = stagedDir, timeoutMs = TIMEOUT_MS }) {
   const started = performance.now();
   const seconds = () => Math.round((performance.now() - started) / 100) / 10;
   if (!request?.trim()) throw new Error('Staging needs a request');
-  const bytes = await readFile(source), model = like && await readFile(like.file);
+  const bytes = await readFile(source);
   // The edit camera stays near level, so the photo always has floor to stand furniture on.
-  const level = (y, p) => ({ yaw: Math.round((((y % 360) + 540) % 360 - 180) * 10) / 10, pitch: Math.min(Math.max(Math.round(p), -25), 5) });
-  const aim = level(yaw, pitch), from = like && level(like.yaw, like.pitch);
-  const prompt = stagingPrompt(request) + (like ? LIKE : '');
+  const aim = { yaw: Math.round((((yaw % 360) + 540) % 360 - 180) * 10) / 10, pitch: Math.min(Math.max(Math.round(pitch), -25), 5) };
+  // One photo in, one out. Giving the model a second, already furnished photo to copy from made it redraw the walls.
+  const prompt = stagingPrompt(request);
   const sha = (data) => createHash('sha256').update(data).digest('hex');
   const key = sha(JSON.stringify([
-    sha(bytes), aim.yaw, aim.pitch, prompt.toLowerCase().replace(/\s+/g, ' '), MODEL, QUALITY, VIEW, ...(like ? [sha(model), from.yaw, from.pitch] : []),
+    sha(bytes), aim.yaw, aim.pitch, prompt.toLowerCase().replace(/\s+/g, ' '), MODEL, QUALITY, VIEW,
   ])).slice(0, 10);
   const slug = String(name || 'staged').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'staged';
   // The same request under another name is still the same picture.
@@ -372,10 +367,8 @@ export async function stagePano({ source, yaw, pitch, request, name, outDir = st
   const work = (async () => {
     const pano = await readPano(bytes);
     const { width, height, hfov } = VIEW, focal = (width / 2) / Math.tan(hfov * Math.PI / 360);
-    const jpeg = (rgb) => sharp(Buffer.from(rgb), { raw: { width, height, channels: 3 } }).jpeg({ quality: 90 }).toBuffer();
     const real = cutView(pano, aim.yaw, aim.pitch, width, height, focal);
-    const sent = [await jpeg(real)];
-    if (like) sent.push(await jpeg(cutView(await readPano(model), from.yaw, from.pitch, width, height, focal)));
+    const sent = await sharp(Buffer.from(real), { raw: { width, height, channels: 3 } }).jpeg({ quality: 90 }).toBuffer();
     // With STAGE_PHOTO_DIR set, the photo the image model returned is kept there, so the lay-back can be redone
     // without paying for it again. Off by default: the photos are only for working on this file.
     const kept = process.env.STAGE_PHOTO_DIR && path.join(process.env.STAGE_PHOTO_DIR, `${key}.jpg`);

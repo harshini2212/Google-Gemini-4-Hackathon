@@ -117,7 +117,7 @@ export const places = {
       hall_arch: { label: 'Hallway arch', yaw: 18, pitch: 0, zoom: 2.3, say: 'The arched opening at the far end of the living room, leading to the bedroom hallway.' },
       walkway: { label: 'Front walkway', yaw: -180, pitch: -18, zoom: 1.3, say: 'Back outside: the concrete walkway, a planting bed with a small tree, and the lawn out to the street.' },
     },
-    leadsTo: ['front_porch', 'front_walk', 'great_room'],
+    leadsTo: ['living_room_front', 'front_porch', 'front_walk', 'great_room'],
     notes: 'The camera stands on the porch in the open doorway: the door frame and the open door fill both edges of the ahead view, and the frame\'s paint is worn. Right is a brick wall. The only walkable link indoors from here is a 6.7 m hop to great_room. Blurred tripod patch at the bottom of the down view.',
   },
   living_room_front: {
@@ -140,7 +140,7 @@ export const places = {
       flooring: { label: 'Wood-look flooring', yaw: -6, pitch: -23, zoom: 1.5, say: 'Wood-look plank flooring in red-brown tones, wall to wall, with white baseboards.' },
       front_window: { label: 'Front window', yaw: -58, pitch: 0, zoom: 1.6, say: 'A front window with white blinds, looking onto the lawn and the house next door.' },
     },
-    leadsTo: ['living_room'],
+    leadsTo: ['entry', 'living_room'],
     notes: 'A blur patch sits on the ceiling fan\'s hub in this scan (ahead and up), so no fan feature here. Right is mostly a door and wall close up. Blurred tripod patch at the bottom of the down view.',
   },
   living_room: {
