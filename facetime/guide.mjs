@@ -1,5 +1,7 @@
 // Ellie, the open-house guide: who she is, what she knows, where she can stand, and what she can do on a call.
 // There is no LiveKit in this file, so the guide can be exercised without a call.
+import { spawn } from 'node:child_process';
+import { openSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -361,13 +363,17 @@ export async function loadGuide(slug = process.env.OPEN_HOUSE_PROPERTY || '') {
       // The lead note a guide would hand the listing side after an open house.
       const note = { property: persona.short, at: new Date().toISOString(), visitor: name || null, liked: liked || null,
         toConfirm: concerns || null, nextStep: next_step, toured, previewed: view.changes ?? [] };
-      const folder = new URL('./visits/', here);
-      mkdir(folder, { recursive: true }).then(() => writeFile(new URL(`${note.at.replace(/[:.]/g, '-')}.json`, folder), JSON.stringify(note, null, 2) + '\n'))
+      const folder = new URL('./visits/', here), file = fileURLToPath(new URL(`${note.at.replace(/[:.]/g, '-')}.json`, folder));
+      mkdir(folder, { recursive: true }).then(() => writeFile(file, JSON.stringify(note, null, 2) + '\n'))
+        .then(() => {
+          // After the call the research desk turns the note into a follow-up for the visitor and a brief for the listing
+          // side. It takes most of a minute, so it runs as a process of its own that outlives the call.
+          if (!deskOpen) return;
+          const log = openSync(file.replace(/\.json$/, '.log'), 'a');
+          spawn(process.execPath, [fileURLToPath(new URL('./research.mjs', here)), '--follow-up', file],
+            { detached: true, stdio: ['ignore', log, log], env: { ...process.env, OPEN_HOUSE_PROPERTY: slug } }).unref();
+        })
         .catch(error => console.error('[guide] could not save the visit note:', error?.message ?? error));
-      // After the call the research desk turns the note into a follow-up for the visitor and a brief for the listing side.
-      if (deskOpen) desk.followUp(note, fileURLToPath(new URL(`./visits/${note.at.replace(/[:.]/g, '-')}/`, here)), slug)
-        .then(files => console.log(`[guide] follow-up packet written: ${files.join(', ')}`))
-        .catch(error => console.error('[guide] follow-up failed:', error?.message ?? error));
       return { view: { ...view, mode: 'card', look: null, card },
         result: { onScreen: 'A recap of the visit', saved: `A note for ${persona.office}`,
           ...(deskOpen ? { followUp: 'Your research desk is writing a follow-up with comparable homes for them and a brief for ' + persona.office + '. Mention it in a few words.' } : {}),

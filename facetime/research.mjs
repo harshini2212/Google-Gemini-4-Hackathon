@@ -194,8 +194,16 @@ ${RULES} When the three files are written, reply with one line listing them.`,
 export const available = slug => readFile(new URL(`./properties/${slug}/site.json`, here), 'utf8')
   .then(text => Boolean(JSON.parse(text).listing?.propertyId) && Boolean(process.env.ANTHROPIC_API_KEY || process.env.OPEN_HOUSE_RESEARCH_MODEL), () => false);
 
-// node --env-file=.env.local research.mjs "question"     tries a question from the command line
+// node --env-file=.env.local research.mjs "question"            tries a question from the command line
+// node research.mjs --follow-up <visit note.json>                writes the follow-up packet beside the note; the
+//                                                                guide starts this as its own process when a call ends
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const answer = await research(process.argv[2] || 'What similar homes are for sale nearby, and how does this one compare?');
-  console.log(JSON.stringify(answer, null, 2));
+  if (process.argv[2] === '--follow-up') {
+    const file = process.argv[3], note = JSON.parse(await readFile(file, 'utf8'));
+    const files = await followUp(note, file.replace(/\.json$/, ''));
+    console.log(`[research] follow-up packet written: ${files.join(', ')}`);
+  } else {
+    const answer = await research(process.argv[2] || 'What similar homes are for sale nearby, and how does this one compare?');
+    console.log(JSON.stringify(answer, null, 2));
+  }
 }
