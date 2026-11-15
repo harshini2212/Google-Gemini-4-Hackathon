@@ -57,9 +57,11 @@ const agent = defineAgent({
     // ElevenLabs the realtime model listens and thinks, and writes what she says for that voice to speak.
     const model = process.env.OPEN_HOUSE_REALTIME_MODEL || 'gpt-realtime';
     const borrowed = process.env.ELEVEN_API_KEY && process.env.ELEVEN_VOICE_ID;
-    // A microphone across a room needs far-field clean-up and a firmer idea of what counts as someone speaking.
-    const ears = process.env.OPEN_HOUSE_ROOM_MIC ? { inputAudioNoiseReduction: { type: 'far_field' },
-      turnDetection: { type: 'server_vad', threshold: 0.7, prefix_padding_ms: 300, silence_duration_ms: 600, create_response: true, interrupt_response: true } } : {};
+    // When she takes her turn: on what was said sounding finished, not on the first pause, so she does not finish the
+    // caller's sentences. OPEN_HOUSE_PATIENCE is low (waits longest), medium or high. Speaking over her still stops her.
+    const turnDetection = { type: 'semantic_vad', eagerness: process.env.OPEN_HOUSE_PATIENCE || 'low', create_response: true, interrupt_response: true };
+    // A microphone across a room also needs far-field clean-up.
+    const ears = { turnDetection, ...(process.env.OPEN_HOUSE_ROOM_MIC ? { inputAudioNoiseReduction: { type: 'far_field' } } : {}) };
     const session = new voice.AgentSession(borrowed
       ? { llm: new realtime.RealtimeModel({ model, modalities: ['text'], ...ears }),
         tts: new elevenlabs.TTS({ voiceId: process.env.ELEVEN_VOICE_ID, model: process.env.ELEVEN_MODEL || 'eleven_flash_v2_5' }) }
