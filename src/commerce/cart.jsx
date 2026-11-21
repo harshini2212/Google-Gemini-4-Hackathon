@@ -1,11 +1,11 @@
-// OWNER: Shopify teammate (see docs/TEAM-PLAN.md). The cart bar + checkout sheet.
+// OWNER: Rucha (see docs/TEAM-PLAN.md). The cart bar + checkout sheet.
 import React from "react";
 import { ExternalLink, ShoppingBag, X } from "lucide-react";
 import "./commerce.css";
 
 const money = n => `$${Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 
-// Props contract (do not rename without telling the other teammate):
+// Props contract (do not rename without telling Harshini):
 //   cart:        CartItem[]  { productId, variantId, title, price, quantity }
 //   setCart:     (CartItem[]) => void
 //   checkouts:   Checkout[] | null   (what POST /api/checkout returned)

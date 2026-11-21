@@ -1,4 +1,4 @@
-// OWNER: Shopify teammate (see docs/TEAM-PLAN.md). Browser-side commerce calls used by Ellie's tools.
+// OWNER: Rucha (see docs/TEAM-PLAN.md). Browser-side commerce calls used by Ellie's tools.
 // main.jsx only calls these three functions, so everything behind them is yours to change.
 
 async function post(path, payload) {

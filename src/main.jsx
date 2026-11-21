@@ -336,7 +336,7 @@ function App() {
           setTab("staged");
           return { placed: out.product.title, note: "Preview shown on screen." };
         }
-        // Commerce is owned by the Shopify teammate: see src/commerce/ and docs/TEAM-PLAN.md.
+        // Commerce is owned by Rucha: see src/commerce/ and docs/TEAM-PLAN.md.
         case "add_to_cart": {
           const item = await makeCartItem(findProduct(args.product_id) ?? args.product_id, args.quantity);
           setCart(c => [...c.filter(x => x.productId !== item.productId), item]);

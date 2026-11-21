@@ -1,4 +1,4 @@
-// OWNER: Shopify teammate (see docs/TEAM-PLAN.md). Commerce API routes, mounted by server/index.mjs.
+// OWNER: Rucha (see docs/TEAM-PLAN.md). Commerce API routes, mounted by server/index.mjs.
 // Add routes here freely; index.mjs never needs to change for commerce work.
 import { ProviderError } from "./gemini.mjs";
 import { checkoutLinks, productById } from "./shopify.mjs";

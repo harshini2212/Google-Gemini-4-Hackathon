@@ -1,4 +1,4 @@
-/* OWNER: Shopify teammate. Cart bar + checkout sheet styles. */
+/* OWNER: Rucha. Cart bar + checkout sheet styles. */
 .cart-bar { position: relative; margin-top: 16px; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); background: var(--surface); border-radius: 12px; }
 .cart-items { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
 .cart-chip { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; padding: 4px 6px 4px 10px; background: var(--green-light); border-radius: 999px; }

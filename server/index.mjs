@@ -101,7 +101,7 @@ const routes = {
     const { frame, productId, where } = await body(req);
     return stageInRoom({ frame: frameOf(frame), productId: String(productId), where: String(where || "").slice(0, 200) });
   },
-  // Commerce routes live in server/commerce.mjs (Shopify teammate owns them).
+  // Commerce routes live in server/commerce.mjs (Rucha owns them).
   ...commerceRoutes({ body }),
   "POST /api/turn": async req => {
     const { contents } = await body(req, 400_000);

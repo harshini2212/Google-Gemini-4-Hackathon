@@ -17,10 +17,10 @@
 | Area | Owner | Files (only the owner edits them) |
 | --- | --- | --- |
 | Live call (voice + camera), 3D generator, room reading, ranking, image placement, eval, UI shell | **Harshini** | `src/main.jsx`, `src/live.mjs`, `src/model-view.jsx`, `src/home.css`, `server/gemini.mjs`, `server/home.mjs`, `server/index.mjs`, `shared/home-tools.mjs`, `eval/*`, `README.md` |
-| Shopify catalog, cart, checkout, **real transactions**, order status | **Shopify teammate** | `server/shopify.mjs`, `server/commerce.mjs`, `src/commerce/cart.jsx`, `src/commerce/client.mjs`, `src/commerce/commerce.css`, `docs/SHOPIFY.md` (new) |
+| Shopify catalog, cart, checkout, **real transactions**, order status | **Rucha (Shopify)** | `server/shopify.mjs`, `server/commerce.mjs`, `src/commerce/cart.jsx`, `src/commerce/client.mjs`, `src/commerce/commerce.css`, `docs/SHOPIFY.md` (new) |
 
 Rules:
-- Edit only your own files. If you need a change in the other person's file, message them.
+- Edit only your own files. Harshini and Rucha message each other for any change in the other person's files.
 - Never commit `.env`. Share keys out of band.
 - Commit small and often to `main`, and pull before you push (`git pull --rebase`). Each of you only touches your own files, so rebases stay clean.
 - Commit messages start with your area: `live: …`, `3d: …`, `shop: …`.
@@ -72,7 +72,7 @@ Rules:
 
 ---
 
-## Shopify teammate: what to build (in order)
+## Rucha: what to build, in order (Shopify + transactions)
 
 **Goal: a real transaction on stage, with the shopper in control.** The guide's rule is "keep people in control whenever an action affects money", so Ellie never pays by herself. The shopper always taps a Confirm or Pay button.
 
@@ -108,7 +108,7 @@ Test without Harshini's code: `curl -X POST localhost:5180/api/checkout -H 'Cont
 
 ## Timeline (today)
 
-| Time | Harshini | Shopify teammate |
+| Time | Harshini | Rucha |
 | --- | --- | --- |
 | now → 3:45 | key in, live call working, first 3D builds | dev store + tokens + seed products |
 | 3:45 → 4:20 | phone camera, 3D tuning, start eval | Storefront `cartCreate` checkout + confirm sheet |
