@@ -155,8 +155,8 @@ function Guide({ messages, partial, pending, status, error, setError, ask, start
   );
 }
 
-function FitBadge({ fit }) {
-  if (!fit || fit.fits === "unknown") return <span className="fit unknown">Size unlisted</span>;
+function FitBadge({ fit, dims }) {
+  if (!fit || fit.fits === "unknown") return <span className="fit unknown">{dims?.w ? "Fit not checked yet" : "Size unlisted"}</span>;
   return <span className={`fit ${fit.fits}`} title={fit.note}>{fit.fits === "yes" ? `Fits · ${fit.margin_cm} cm spare` : "Too wide"}</span>;
 }
 
@@ -175,7 +175,7 @@ function Products({ products, room, run, cart }) {
               <p className="product-store">{p.storeName}</p>
               <h3>{p.title}</h3>
               <p className="product-meta"><b>{money(p.price)}</b>{p.listingDims?.w ? ` · ${cm(p.listingDims.w)} wide` : ""}</p>
-              <FitBadge fit={p.fit} />
+              <FitBadge fit={p.fit} dims={p.listingDims} />
               {p.reason && <p className="product-reason">{p.reason}</p>}
               <div className="product-actions">
                 <button type="button" onClick={() => run("show_in_3d", { product_id: p.id })}><Box size={14} /> 3D</button>
