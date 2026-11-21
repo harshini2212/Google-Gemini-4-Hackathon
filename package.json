@@ -10,7 +10,8 @@
     "dev": "node --env-file-if-exists=.env server/index.mjs --dev",
     "build": "vite build",
     "start": "node --env-file-if-exists=.env server/index.mjs",
-    "prepare:demo": "node --env-file-if-exists=.env scripts/prepare-demo.mjs"
+    "prepare:demo": "node --env-file-if-exists=.env scripts/prepare-demo.mjs",
+    "phone": "ELLIE_PHONE=1 node --env-file-if-exists=.env server/index.mjs --dev"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

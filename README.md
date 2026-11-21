@@ -62,6 +62,8 @@ cp .env.example .env    # add GEMINI_API_KEY and the Gemini 4 model ids from the
 npm run dev             # http://localhost:5180
 ```
 
+**On your phone:** `npm run phone` also serves HTTPS on your Wi-Fi address (it prints `https://<ip>:5443`). Open that on a phone on the same Wi-Fi, accept the self-signed certificate warning, and the phone camera and mic work.
+
 Open it in Chrome, turn on the camera, and either tap **Talk live** or type. Shopify search needs no keys, because it uses each store's public storefront endpoints.
 
 ## What we built today

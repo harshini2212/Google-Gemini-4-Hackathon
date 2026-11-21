@@ -1,4 +1,8 @@
 import { createServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+import { networkInterfaces } from "node:os";
+import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -110,11 +114,19 @@ const routes = {
   },
 };
 
+// Phone mode (ELLIE_PHONE=1): also serve HTTPS on the Wi-Fi address so a phone's camera works.
+const phone = process.env.ELLIE_PHONE === "1";
+const phonePort = Number(process.env.ELLIE_PHONE_PORT || 5443);
+const lanIps = Object.values(networkInterfaces()).flat().filter(i => i?.family === "IPv4" && !i.internal).map(i => i.address);
+const allowedHost = host => /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)
+  || (phone && lanIps.some(ip => host === `${ip}:${phonePort}`));
+
 async function handle(req, res) {
   const host = req.headers.host ?? "";
-  if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return json(res, 403, { error: "Use a localhost address." });
-  if (req.headers.origin && req.headers.origin !== `http://${host}`) {
-    return json(res, 403, { error: "Open Ellie on the same localhost address." });
+  if (!allowedHost(host)) return json(res, 403, { error: "Use a localhost address." });
+  const scheme = req.socket.encrypted ? "https" : "http";
+  if (req.headers.origin && req.headers.origin !== `${scheme}://${host}`) {
+    return json(res, 403, { error: "Open Ellie on the same address." });
   }
   const pathname = new URL(req.url, `http://${host}`).pathname;
   const route = routes[`${req.method} ${pathname}`];
@@ -128,14 +140,31 @@ async function handle(req, res) {
   return json(res, 404, { error: "Page unavailable." });
 }
 
-const server = createServer((req, res) => handle(req, res).catch(error => {
+const onRequest = (req, res) => handle(req, res).catch(error => {
   if (error instanceof ProviderError) return json(res, error.status, { error: error.message });
   console.error("Request failed", error.code ?? error.name, error.message);
   return json(res, 500, { error: "Ellie could not complete this request." });
-}));
+});
+const server = createServer(onRequest);
 
 if (isDev) {
   const { createServer: createVite } = await import("vite");
   vite = await createVite({ root, server: { middlewareMode: true, hmr: { server } }, appType: "spa" });
 }
 server.listen(port, "127.0.0.1", () => console.log(`Ellie Home · http://localhost:${port}`));
+
+if (phone) {
+  // Self-signed certificate for the Wi-Fi address (made once, kept out of git in .local/).
+  const dir = join(root, ".local");
+  const key = join(dir, "phone-key.pem");
+  const cert = join(dir, "phone-cert.pem");
+  if (!existsSync(cert)) {
+    execFileSync("mkdir", ["-p", dir]);
+    execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=Ellie Home",
+      "-keyout", key, "-out", cert], { stdio: "ignore" });
+  }
+  const secure = createHttpsServer({ key: await readFile(key), cert: await readFile(cert) }, onRequest);
+  secure.listen(phonePort, "0.0.0.0", () => {
+    for (const ip of lanIps) console.log(`Ellie Home on your phone · https://${ip}:${phonePort}  (same Wi-Fi; accept the certificate warning)`);
+  });
+}
