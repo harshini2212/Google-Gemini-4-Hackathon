@@ -39,6 +39,20 @@ function geminiBeta() {
   return betaClient;
 }
 
+// Retry 503 "model overloaded" and transient network errors (per the hackathon account guide). Never retry 4xx.
+async function withRetry(call, tries = 3) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await call();
+    } catch (error) {
+      const status = error?.status ?? error?.code;
+      const transient = status === 503 || status === 500 || status === "ECONNRESET" || /overloaded|unavailable|fetch failed/i.test(String(error?.message));
+      if (!transient || attempt >= tries) throw error;
+      await new Promise(r => setTimeout(r, 600 * 2 ** (attempt - 1) + Math.random() * 300));
+    }
+  }
+}
+
 // A running log of every model call, shown in the app so judges can see which model did which job.
 const trace = [];
 export function recentTrace() {
@@ -51,7 +65,7 @@ function record(entry) {
 
 function friendly(error) {
   const status = error?.status ?? error?.code;
-  if (status === 429) return new ProviderError(429, "Gemini is rate limiting us. Try again in a few seconds.");
+  if (status === 429) return new ProviderError(429, "Gemini hit a rate or spend limit. Wait a few seconds, or raise the cap at aistudio.google.com/spend.");
   if (status === 400 || status === 404) return new ProviderError(502, `Gemini rejected the request (${String(error.message).slice(0, 180)}).`);
   return new ProviderError(502, `Gemini could not answer that request (${String(error?.message ?? "").slice(0, 120)}).`);
 }
@@ -75,7 +89,7 @@ export async function generateJson({ role, job, parts, schema, system, thinking 
   const model = MODELS[role]();
   const started = Date.now();
   try {
-    const response = await gemini().models.generateContent({
+    const response = await withRetry(() => gemini().models.generateContent({
       model,
       contents: [{ role: "user", parts }],
       config: {
@@ -84,7 +98,7 @@ export async function generateJson({ role, job, parts, schema, system, thinking 
         responseSchema: schema,
         thinkingConfig: { thinkingLevel: thinking ?? THINKING[role] ?? "MEDIUM" },
       },
-    });
+    }));
     const value = JSON.parse(response.text ?? "");
     record({ role, model, job, ms: Date.now() - started, ok: true });
     return value;
@@ -101,7 +115,7 @@ export async function decide({ job, input, questions }) {
   const model = MODELS.decision();
   const started = Date.now();
   try {
-    const response = await geminiBeta().decisions.create({ model, input, questions });
+    const response = await withRetry(() => geminiBeta().decisions.create({ model, input, questions }));
     record({ role: "decision", model, job, ms: Date.now() - started, ok: true });
     return response.answers ?? {};
   } catch (error) {
@@ -121,10 +135,10 @@ export async function generateImage({ job, parts }) {
   const model = MODELS.image();
   const started = Date.now();
   try {
-    const response = await gemini().models.generateContent({
+    const response = await withRetry(() => gemini().models.generateContent({
       model, contents: [{ role: "user", parts }],
       config: { responseModalities: ["IMAGE", "TEXT"] },
-    });
+    }));
     const out = response.candidates?.[0]?.content?.parts ?? [];
     const image = out.find(part => part.inlineData?.data);
     record({ role: "image", model, job, ms: Date.now() - started, ok: Boolean(image) });
@@ -142,10 +156,10 @@ export async function chatStep({ contents, system, tools }) {
   const model = MODELS.hydrogen();
   const started = Date.now();
   try {
-    const response = await gemini().models.generateContent({
+    const response = await withRetry(() => gemini().models.generateContent({
       model, contents,
       config: { systemInstruction: system, tools: [{ functionDeclarations: tools }], thinkingConfig: { thinkingLevel: "LOW" } },
-    });
+    }));
     const content = response.candidates?.[0]?.content ?? { role: "model", parts: [] };
     record({ role: "hydrogen", model, job: "chat agent turn", ms: Date.now() - started, ok: true });
     return {
