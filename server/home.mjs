@@ -266,9 +266,12 @@ export function snapToDims(model, dims) {
   };
 }
 
+// Carbon's thinking level for 3D builds: LOW keeps a live build in seconds; set BUILD_THINKING=MEDIUM for max quality.
+const buildThinking = () => process.env.BUILD_THINKING || "LOW";
+
 async function draftModel(product, dims, photos) {
   return generateJson({
-    role: "carbon", job: "draft the 3D part model",
+    role: "carbon", job: "draft the 3D part model", thinking: buildThinking(),
     system: MODEL_RULES,
     parts: [{ text: `Product: ${product.title} (${product.type || "furniture"}) from ${product.storeName}.\nTarget overall size: width ${dims.w} cm, depth ${dims.d} cm, height ${dims.h} cm.\nListing: ${product.description.slice(0, 1200)}` }, ...photos],
     schema: modelSchema
@@ -277,22 +280,32 @@ async function draftModel(product, dims, photos) {
 
 async function repairModel(product, dims, photos, model, issues, job = "repair the 3D model") {
   return generateJson({
-    role: "carbon", job,
+    role: "carbon", job, thinking: buildThinking(),
     system: MODEL_RULES,
     parts: [{ text: `Product: ${product.title}. Target overall size: width ${dims.w} cm, depth ${dims.d} cm, height ${dims.h} cm.\nYour previous model failed these checks:\n- ${issues.join("\n- ")}\nFix every issue and return the full corrected model.\nPrevious model:\n${JSON.stringify(model)}` }, ...photos],
     schema: modelSchema
   });
 }
 
-export async function buildModel(productId, options) {
-  return buildModelFor(await productById(productId), options);
+// Finished (or in-flight) builds by product id, so a repeat request is instant and search can pre-build the top pick.
+const builds = new Map();
+export function buildModel(productId, options) {
+  if (!builds.has(productId)) {
+    const job = productById(productId).then(product => buildModelFor(product, options));
+    builds.set(productId, job);
+    job.catch(() => builds.delete(productId));
+  }
+  return builds.get(productId);
+}
+export function prebuild(productId) {
+  buildModel(productId).catch(() => {});
 }
 
 // Baseline for the eval: one call, no dimension step, no checks, no repair, no snap.
 export async function baselineModel(product) {
   const photos = await Promise.all((product.images.length ? product.images : [product.image]).slice(0, 2).map(url => fetchImagePart(url)));
   return generateJson({
-    role: "carbon", job: "baseline: one-shot 3D model",
+    role: "carbon", job: "baseline: one-shot 3D model", thinking: buildThinking(),
     system: MODEL_RULES.replace(" Match the target overall dimensions exactly.", " Use the real-world size of the product."),
     parts: [{ text: `Product: ${product.title} (${product.type || "furniture"}) from ${product.storeName}.\nListing: ${product.description.slice(0, 1200)}` }, ...photos],
     schema: modelSchema

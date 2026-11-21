@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { chatStep, liveToken, MODELS, ProviderError, recentTrace } from "./gemini.mjs";
 import { searchProducts, stores } from "./shopify.mjs";
 import { commerceRoutes } from "./commerce.mjs";
-import { buildModel, critiqueModel, fillSpecs, rankProducts, scanRoom, stageInRoom } from "./home.mjs";
+import { buildModel, critiqueModel, fillSpecs, prebuild, rankProducts, scanRoom, stageInRoom } from "./home.mjs";
 import { homeInstructions, homeTools } from "../shared/home-tools.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -91,6 +91,8 @@ const routes = {
     const space = Number(space_width_cm) ? { width_cm: Number(space_width_cm) } : room?.open_spaces?.[0] ?? null;
     const pool = await fillSpecs(found.slice(0, 16));
     const ranked = await rankProducts({ products: pool, request: query, room, space });
+    // Start building the top pick in 3D now, so "show it in 3D" is ready by the time the shopper asks.
+    if (ranked[0]) prebuild(ranked[0].id);
     return { products: ranked.slice(0, 6), space, searched: stores().length };
   },
   "POST /api/model3d": async req => {

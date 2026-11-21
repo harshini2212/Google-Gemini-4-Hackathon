@@ -125,30 +125,39 @@ export async function decide({ job, input, questions }) {
 }
 
 // Rubric answers come back as a probability-weighted level; normalize to 0..1.
+// Decision 1 returns the probability-weighted level index (0 .. levels-1), e.g. 3.79 of 0..4.
 export function rubric01(answer, levels) {
   if (!answer || typeof answer.score !== "number") return null;
-  return answer.score <= 1 ? answer.score : answer.score / Math.max(1, levels - 1);
+  return Math.max(0, Math.min(1, answer.score / Math.max(1, levels - 1)));
 }
 
 // Nano Banana image editing. Returns { mimeType, data } of the first image in the reply.
-export async function generateImage({ job, parts }) {
-  const model = MODELS.image();
+// If the model answers with text only, retry once, then fall back to the fast image model.
+async function imageOnce(model, parts, job) {
   const started = Date.now();
   try {
     const response = await withRetry(() => gemini().models.generateContent({
       model, contents: [{ role: "user", parts }],
-      config: { responseModalities: ["IMAGE", "TEXT"] },
+      config: { responseModalities: ["IMAGE"] },
     }));
-    const out = response.candidates?.[0]?.content?.parts ?? [];
-    const image = out.find(part => part.inlineData?.data);
+    const image = (response.candidates?.[0]?.content?.parts ?? []).find(part => part.inlineData?.data && !part.thought);
     record({ role: "image", model, job, ms: Date.now() - started, ok: Boolean(image) });
-    if (!image) throw new ProviderError(502, "The image model did not return a picture.");
-    return { mimeType: image.inlineData.mimeType || "image/png", data: image.inlineData.data };
+    return image ? { mimeType: image.inlineData.mimeType || "image/png", data: image.inlineData.data } : null;
   } catch (error) {
-    if (error instanceof ProviderError) throw error;
     record({ role: "image", model, job, ms: Date.now() - started, ok: false });
-    throw friendly(error);
+    if (error?.status === 429) throw friendly(error);
+    return null;
   }
+}
+
+export async function generateImage({ job, parts }) {
+  const primary = MODELS.image();
+  const fast = process.env.GEMINI_IMAGE_FAST_MODEL || "gemini-3.1-flash-lite-image";
+  const image = await imageOnce(primary, parts, job)
+    ?? await imageOnce(primary, [{ text: "Return an image only." }, ...parts], job + " (retry)")
+    ?? await imageOnce(fast, parts, job + " (fast fallback)");
+  if (!image) throw new ProviderError(502, "The image model did not return a picture.");
+  return image;
 }
 
 // One step of the typed conversation on Hydrogen: may return function calls for the browser to run.
